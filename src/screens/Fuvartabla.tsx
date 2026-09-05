@@ -1,0 +1,411 @@
+import { useState, useEffect } from 'react'
+import { format, startOfWeek, addDays } from 'date-fns'
+import { hu } from 'date-fns/locale'
+import { Header } from '../components/Header'
+import { supabase } from '../lib/supabase'
+import { useHousehold } from '../hooks/useHousehold'
+import { useAuth } from '../lib/auth'
+import type { TransportLeg, Occurrence } from '../types'
+
+type LegRow = TransportLeg & {
+  occurrence: Occurrence
+  companion_id?:  string | null
+  companion2_id?: string | null
+}
+
+export function Fuvartabla() {
+  const { person } = useAuth()
+  const { drivers, householdId, personById, locationById } = useHousehold()
+  const [weekOffset, setWeekOffset] = useState(0)
+  const [legs, setLegs] = useState<LegRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [filter, setFilter] = useState<'all' | 'mine'>('all')
+  const [openLegId, setOpenLegId] = useState<string | null>(null)
+  const [pickerStep, setPickerStep] = useState<'driver' | 'companion'>('driver')
+  const [pendingDriverId, setPendingDriverId] = useState<string | null>(null)
+  const [selectedCompanions, setSelectedCompanions] = useState<string[]>([])
+  const [returnAlso, setReturnAlso] = useState(false)
+  const [assigning, setAssigning] = useState(false)
+
+  const today     = new Date()
+  const weekStart = addDays(startOfWeek(today, { weekStartsOn: 1 }), weekOffset * 7)
+  const days      = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
+
+  useEffect(() => {
+    if (!householdId) return
+    const from = days[0].toISOString()
+    const to   = days[6].toISOString()
+    setLoading(true)
+    supabase.from('transport_leg').select('*, occurrence!inner(*)')
+      .eq('household_id', householdId)
+      .gte('depart_at', from).lte('depart_at', to)
+      .order('depart_at')
+      .then(({ data }) => { setLegs((data as any) ?? []); setLoading(false) })
+  }, [householdId, weekOffset])
+
+  function openLeg(legId: string) {
+    if (openLegId === legId) {
+      setOpenLegId(null)
+    } else {
+      setOpenLegId(legId)
+      setPickerStep('driver')
+      setPendingDriverId(null)
+      setSelectedCompanions([])
+      setReturnAlso(false)
+    }
+  }
+
+  function pickDriver(legId: string, driverId: string | null) {
+    if (driverId === null) {
+      doAssign(legId, null, null, null)
+    } else {
+      const leg = legs.find(l => l.id === legId)
+      const pre: string[] = []
+      if (leg?.companion_id  && leg.companion_id  !== driverId) pre.push(leg.companion_id)
+      if (leg?.companion2_id && leg.companion2_id !== driverId) pre.push(leg.companion2_id)
+      setPendingDriverId(driverId)
+      setSelectedCompanions(pre)
+      setReturnAlso(false)
+      setPickerStep('companion')
+    }
+  }
+
+  function toggleCompanion(personId: string) {
+    setSelectedCompanions(prev => {
+      if (prev.includes(personId)) return prev.filter(id => id !== personId)
+      if (prev.length >= 2) return prev
+      return [...prev, personId]
+    })
+  }
+
+  // Check if a paired leg exists (same occurrence, opposite direction)
+  function pairedLeg(legId: string): LegRow | undefined {
+    const leg = legs.find(l => l.id === legId)
+    if (!leg) return undefined
+    return legs.find(l =>
+      l.occurrence_id === leg.occurrence_id &&
+      l.direction !== leg.direction
+    )
+  }
+
+  async function confirmCompanions(legId: string) {
+    const comp1 = selectedCompanions[0] ?? null
+    const comp2 = selectedCompanions[1] ?? null
+    await doAssign(legId, pendingDriverId, comp1, comp2)
+
+    if (returnAlso) {
+      const paired = pairedLeg(legId)
+      if (paired) {
+        await doAssign(paired.id, pendingDriverId, comp1, comp2, true)
+      }
+    }
+  }
+
+  async function doAssign(
+    legId: string,
+    driverId: string | null,
+    comp1: string | null,
+    comp2: string | null,
+    silent = false,
+  ) {
+    if (!silent) setAssigning(true)
+    const { data } = await supabase.from('transport_leg')
+      .update({ driver_id: driverId, companion_id: comp1, companion2_id: comp2 })
+      .eq('id', legId).select('*, occurrence!inner(*)').single()
+    if (data) setLegs(prev => prev.map(l => l.id === legId ? data as any : l))
+    if (!silent) {
+      setOpenLegId(null)
+      setPickerStep('driver')
+      setPendingDriverId(null)
+      setSelectedCompanions([])
+      setReturnAlso(false)
+      setAssigning(false)
+    }
+  }
+
+  const myId = person?.id
+  const orphans     = legs.filter(l => !l.driver_id && l.occurrence?.status !== 'cancelled')
+  const allAssigned = legs.length > 0 && orphans.length === 0
+  const bannerClass = allAssigned ? 'ok' : orphans.length ? 'warn' : 'neutral'
+
+  const grouped = days.map(d => {
+    let dayLegs = legs.filter(l => l.depart_at.startsWith(format(d, 'yyyy-MM-dd')))
+    if (filter === 'mine' && myId) {
+      dayLegs = dayLegs.filter(l =>
+        l.driver_id === myId ||
+        l.companion_id === myId ||
+        l.companion2_id === myId
+      )
+    }
+    return {
+      date: d,
+      label: format(d, 'EEEE, MMM d.', { locale: hu }),
+      legs: dayLegs,
+    }
+  })
+
+  function crewLabel(leg: LegRow) {
+    const parts = [
+      personById(leg.driver_id)?.display_name,
+      personById(leg.companion_id)?.display_name,
+      personById(leg.companion2_id)?.display_name,
+    ].filter(Boolean)
+    return parts.join(' + ')
+  }
+
+  return (
+    <div style={{ background: 'var(--color-bg)', minHeight: '100dvh' }}>
+      <Header
+        title="Fuvartábla"
+        subtitle={`${format(days[0], 'MMM d.', { locale: hu })} – ${format(days[6], 'MMM d.', { locale: hu })}`}
+        action={
+          <div style={{ display: 'flex', gap: 4 }}>
+            <button className="week-nav-btn" onClick={() => setWeekOffset(o => o - 1)}>◀</button>
+            <button className="week-nav-today" onClick={() => setWeekOffset(0)}>Ma</button>
+            <button className="week-nav-btn" onClick={() => setWeekOffset(o => o + 1)}>▶</button>
+          </div>
+        }
+      />
+
+      <div className={`status-banner ${bannerClass}`} style={{ margin: '12px 16px 0' }}>
+        {loading
+          ? 'Betöltés…'
+          : allAssigned
+            ? <><span>✓</span><span>Minden láb ki van osztva</span></>
+            : orphans.length > 0
+              ? <><span>⚠</span><span>{orphans.length} gazdátlan láb ezen a héten</span></>
+              : <span>Nincs fuvar ezen a héten</span>}
+      </div>
+
+      {/* Filter chips */}
+      <div style={{ display: 'flex', gap: 8, padding: '10px 16px 0' }}>
+        {(['all', 'mine'] as const).map(f => (
+          <button
+            key={f}
+            onClick={() => setFilter(f)}
+            style={{
+              padding: '5px 14px',
+              borderRadius: 100,
+              fontSize: 12,
+              fontWeight: 600,
+              border: `1px solid ${filter === f ? 'var(--color-blue)' : 'var(--color-border)'}`,
+              background: filter === f ? 'rgba(79,156,249,0.12)' : 'var(--color-surface)',
+              color: filter === f ? 'var(--color-blue)' : 'var(--color-muted)',
+              cursor: 'pointer',
+              transition: 'all 0.15s',
+            }}
+          >
+            {f === 'all' ? 'Összes' : 'Csak én'}
+          </button>
+        ))}
+      </div>
+
+      {!loading && (
+        <div style={{ padding: '16px 16px 96px' }}>
+          {grouped.every(g => g.legs.length === 0) && (
+            <div className="empty-state">
+              <div className="icon">📭</div>
+              <div className="title">
+                {filter === 'mine' ? 'Neked nincs fuvarod ezen a héten' : 'Nincs fuvar ezen a héten'}
+              </div>
+            </div>
+          )}
+
+          {grouped.map(g => g.legs.length > 0 && (
+            <div key={g.date.toISOString()} style={{ marginBottom: 24 }}>
+              <div className="day-header">{g.label}</div>
+
+              {g.legs.map(leg => {
+                const occ      = leg.occurrence
+                const driver   = personById(leg.driver_id)
+                const child    = personById(occ?.person_id)
+                const isOrphan = !leg.driver_id && occ?.status !== 'cancelled'
+                const isOpen   = openLegId === leg.id
+                const fromLoc  = locationById(leg.from_location)
+                const toLoc    = locationById(leg.to_location)
+                const stripe   = child?.color ?? 'var(--color-border)'
+                const hasPaired = !!pairedLeg(leg.id)
+
+                return (
+                  <div key={leg.id} style={{ marginBottom: 8 }}>
+                    <div
+                      className={`leg-card ${isOrphan ? 'orphan' : ''}`}
+                      style={{
+                        display: 'flex',
+                        borderRadius: isOpen ? 'var(--r-md) var(--r-md) 0 0' : undefined,
+                        opacity: occ?.status === 'cancelled' ? 0.5 : 1,
+                      }}
+                    >
+                      <div className="leg-card-stripe" style={{ background: stripe }} />
+                      <div className="leg-card-body">
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                              {format(new Date(leg.depart_at), 'HH:mm')}
+                            </span>
+                            <span style={{ fontSize: 13 }}>
+                              {leg.direction === 'dropoff' ? '→' : '←'} {occ?.title ?? '?'}
+                            </span>
+                            {child && (
+                              <span style={{ fontSize: 11, color: child.color, fontWeight: 600 }}>
+                                ({child.display_name})
+                              </span>
+                            )}
+                          </div>
+                          {(fromLoc || toLoc) && (
+                            <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2 }}>
+                              {fromLoc?.name}{fromLoc && toLoc ? ' → ' : ''}{toLoc?.name}
+                            </div>
+                          )}
+                        </div>
+
+                        <button
+                          className={`driver-badge ${isOrphan ? 'orphan' : 'assigned'}`}
+                          onClick={() => openLeg(leg.id)}
+                          disabled={occ?.status === 'cancelled'}
+                          style={{ opacity: occ?.status === 'cancelled' ? 0.6 : 1 }}
+                        >
+                          {driver && (
+                            <div className="driver-avatar" style={{ background: driver.color }}>
+                              {driver.display_name[0]}
+                            </div>
+                          )}
+                          <span>{isOrphan ? '? Nincs' : crewLabel(leg)}</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Picker */}
+                    {isOpen && (
+                      <div
+                        className="picker-panel"
+                        style={{
+                          borderRadius: '0 0 var(--r-md) var(--r-md)',
+                          border: '1px solid var(--color-border)',
+                          borderTop: 'none',
+                        }}
+                      >
+                        {pickerStep === 'driver' ? (
+                          <>
+                            <div className="picker-label">Ki vezet?</div>
+                            <div className="picker-grid">
+                              <button
+                                className="picker-btn none-btn"
+                                onClick={() => pickDriver(leg.id, null)}
+                              >
+                                <span style={{ color: 'var(--color-red)' }}>⊘</span>
+                                Gazdátlan hagyás
+                              </button>
+                              {drivers.map(d => (
+                                <button
+                                  key={d.id}
+                                  className={`picker-btn ${leg.driver_id === d.id ? 'selected' : ''}`}
+                                  onClick={() => pickDriver(leg.id, d.id)}
+                                  disabled={assigning}
+                                >
+                                  <div className="driver-avatar" style={{ background: d.color }}>
+                                    {d.display_name[0]}
+                                  </div>
+                                  {d.display_name}
+                                </button>
+                              ))}
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div className="picker-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <button
+                                onClick={() => { setPickerStep('driver'); setPendingDriverId(null); setSelectedCompanions([]); setReturnAlso(false) }}
+                                style={{ background: 'none', border: 'none', color: 'var(--color-muted)', cursor: 'pointer', fontSize: 18, padding: 0, lineHeight: 1 }}
+                              >←</button>
+                              Ki megy még?
+                              <span style={{ color: 'var(--color-muted-2)', fontWeight: 500, textTransform: 'none', letterSpacing: 0, fontSize: 11 }}>
+                                (max 2 · {personById(pendingDriverId)?.display_name} vezet)
+                              </span>
+                            </div>
+
+                            <div className="picker-grid">
+                              {drivers
+                                .filter(d => d.id !== pendingDriverId)
+                                .map(d => {
+                                  const sel = selectedCompanions.includes(d.id)
+                                  const maxed = !sel && selectedCompanions.length >= 2
+                                  return (
+                                    <button
+                                      key={d.id}
+                                      className={`picker-btn ${sel ? 'selected' : ''}`}
+                                      onClick={() => toggleCompanion(d.id)}
+                                      disabled={assigning || maxed}
+                                      style={{ opacity: maxed ? 0.4 : 1 }}
+                                    >
+                                      <div className="driver-avatar" style={{ background: d.color }}>
+                                        {d.display_name[0]}
+                                      </div>
+                                      {d.display_name}
+                                      {sel && <span style={{ marginLeft: 'auto', color: 'var(--color-blue)', fontSize: 14 }}>✓</span>}
+                                    </button>
+                                  )
+                                })}
+                            </div>
+
+                            {/* Visszahozza is? toggle — only if a paired leg exists */}
+                            {hasPaired && (
+                              <button
+                                onClick={() => setReturnAlso(r => !r)}
+                                style={{
+                                  display: 'flex', alignItems: 'center', gap: 10,
+                                  width: '100%', marginTop: 10,
+                                  padding: '9px 12px', borderRadius: 'var(--r-sm)',
+                                  background: returnAlso ? 'rgba(45,216,138,0.08)' : 'var(--color-surface-2)',
+                                  border: `1px solid ${returnAlso ? 'rgba(45,216,138,0.3)' : 'var(--color-border)'}`,
+                                  color: returnAlso ? 'var(--color-green)' : 'var(--color-muted)',
+                                  cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                                  transition: 'all 0.15s',
+                                }}
+                              >
+                                <span style={{
+                                  width: 18, height: 18, borderRadius: 4, flexShrink: 0,
+                                  background: returnAlso ? 'var(--color-green)' : 'var(--color-border)',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  fontSize: 11, color: returnAlso ? '#000' : 'transparent',
+                                  transition: 'all 0.15s',
+                                }}>✓</span>
+                                Visszahozza is — ugyanez a csapat
+                              </button>
+                            )}
+
+                            {/* Confirm row */}
+                            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                              <button
+                                className="picker-btn none-btn"
+                                onClick={() => confirmCompanions(leg.id)}
+                                disabled={assigning}
+                                style={{
+                                  flex: 1, justifyContent: 'center',
+                                  background: 'rgba(79,156,249,0.12)',
+                                  color: 'var(--color-blue)',
+                                  border: '1px solid rgba(79,156,249,0.3)',
+                                  fontWeight: 600,
+                                }}
+                              >
+                                {assigning
+                                  ? 'Mentés…'
+                                  : selectedCompanions.length === 0
+                                    ? 'Egyedül megy ✓'
+                                    : `Kész (${1 + selectedCompanions.length} fő) ✓`}
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
