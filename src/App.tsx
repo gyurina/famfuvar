@@ -6,6 +6,7 @@ import { Ma } from './screens/Ma'
 import { Fuvartabla } from './screens/Fuvartabla'
 import { Het } from './screens/Het'
 import { Sablon } from './screens/Sablon'
+import { Esemeny } from './screens/Esemeny'
 import { Beallitasok } from './screens/Beallitasok'
 
 function AppShell() {
@@ -27,6 +28,7 @@ function AppShell() {
         <Route path="/"            element={<Ma />} />
         <Route path="/fuvar"       element={<Fuvartabla />} />
         <Route path="/het"         element={<Het />} />
+        <Route path="/esemeny"     element={<Esemeny />} />
         <Route path="/sablon"      element={<Sablon />} />
         <Route path="/beallitasok" element={<Beallitasok />} />
         <Route path="*"            element={<Navigate to="/" replace />} />
