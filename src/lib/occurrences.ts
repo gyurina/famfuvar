@@ -279,3 +279,41 @@ export async function closeTemplateAndCreateNew(
 
   if (delErr) throw delErr
 }
+
+// ── Visszaállítás az eredeti sablonra ────────────────────────────────────────
+export async function resetOccurrenceToTemplate(
+  occurrenceId: string,
+  template: ScheduleTemplate,
+): Promise<void> {
+  const personId = await currentPersonId()
+
+  const { error } = await supabase
+    .from('occurrence')
+    .update({
+      starts_at:   template.starts_at,
+      ends_at:     template.ends_at,
+      location_id: template.location_id,
+      note:        null,
+      is_override: false,
+      updated_by:  personId,
+      updated_at:  new Date().toISOString(),
+    })
+    .eq('id', occurrenceId)
+
+  if (error) throw error
+
+  // Leg-ek újragenerálása az eredeti sablon adataival
+  const { data: occ } = await supabase
+    .from('occurrence')
+    .select('*')
+    .eq('id', occurrenceId)
+    .single()
+
+  if (occ) {
+    await regenerateLegs(occ, {
+      starts_at:   template.starts_at,
+      ends_at:     template.ends_at,
+      location_id: template.location_id,
+    })
+  }
+}

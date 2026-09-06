@@ -14,6 +14,7 @@ import {
   cancelOccurrence,
   updateOccurrence,
   closeTemplateAndCreateNew,
+  resetOccurrenceToTemplate,
 } from '../lib/occurrences'
 
 type Scope  = 'this' | 'future'
@@ -69,8 +70,12 @@ export function OccurrenceOverrideModal({ occ, template, locations, onClose, onD
           location_id: locationId !== occ.location_id           ? locationId : undefined,
           note:        note !== (occ.note ?? '')                 ? note       : undefined,
         }
+        const hasChanges = Object.values(patch).some(v => v !== undefined)
         if (scope === 'this') {
-          await updateOccurrence(occ.id, patch)
+          if (hasChanges) {
+            await updateOccurrence(occ.id, patch)
+          }
+          // ha nincs változás, csak bezárjuk (onDone)
         } else {
           // Sablon csere
           if (template) {
@@ -243,6 +248,30 @@ export function OccurrenceOverrideModal({ occ, template, locations, onClose, onD
             </label>
 
             {error && <div style={{ color: 'var(--color-red)', fontSize: 12, marginBottom: 10 }}>{error}</div>}
+
+            {occ.is_override && hasTemplate && template && (
+              <button
+                onClick={async () => {
+                  setSaving(true); setError(null)
+                  try {
+                    await resetOccurrenceToTemplate(occ.id, template)
+                    onDone()
+                  } catch (e: unknown) {
+                    setError(e instanceof Error ? e.message : 'Hiba történt')
+                    setSaving(false)
+                  }
+                }}
+                disabled={saving}
+                style={{
+                  width: '100%', marginBottom: 10, padding: '10px 0',
+                  borderRadius: 'var(--r-md)', fontSize: 13, cursor: 'pointer',
+                  background: 'transparent',
+                  color: 'var(--color-muted)',
+                  border: '1px dashed var(--color-border)',
+                  opacity: saving ? 0.6 : 1,
+                }}
+              >↩ Visszaállítás az eredeti sablonra</button>
+            )}
 
             <div style={{ display: 'flex', gap: 10 }}>
               <button

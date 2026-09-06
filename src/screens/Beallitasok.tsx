@@ -10,7 +10,7 @@ import { startGoogleAuth, syncNow, disconnectGoogle, fetchGoogleCalendars } from
 import { format } from 'date-fns'
 
 const WEEKDAYS = ['Hétfő','Kedd','Szerda','Csütörtök','Péntek','Szombat','Vasárnap']
-type Tab = 'helyszin' | 'utido' | 'elerheto' | 'naptarak'
+type Tab = 'helyszin' | 'utido' | 'elerheto' | 'naptarak' | 'diagnozis'
 
 const inp: React.CSSProperties = {
   width: '100%', padding: '6px 10px', borderRadius: 8, fontSize: 13,
@@ -116,6 +116,7 @@ export function Beallitasok() {
     { key: 'utido',    label: 'Útidő' },
     { key: 'elerheto', label: 'Elérhetőség' },
     { key: 'naptarak', label: 'Naptárak' },
+    { key: 'diagnozis', label: '🩺 Diagnózis' },
   ]
 
   // ── Helyszínek state ──
@@ -257,6 +258,195 @@ export function Beallitasok() {
     if (error) { setAvailError(error.message); return }
     setAvailabilities(avs => [...avs, data as DriverAvailability])
     setNewSlot(null); setNewSlotFrom('08:00'); setNewSlotTo('18:00')
+  }
+
+
+  // ── Diagnózis state ──────────────────────────────────────────────────────
+  type DiagSeverity = 'ok' | 'warn' | 'error'
+  type DiagResult = { id: string; severity: DiagSeverity; label: string; detail?: string }
+
+  const [diagRunning, setDiagRunning] = useState(false)
+  const [diagResults, setDiagResults] = useState<DiagResult[] | null>(null)
+
+  async function runDiagnosis() {
+    if (!householdId) return
+    setDiagRunning(true)
+    setDiagResults(null)
+    const results: DiagResult[] = []
+
+    try {
+      // Adatok lekérése
+      const [occRes, legRes, tplRes, locRes, ttRes] = await Promise.all([
+        supabase.from('occurrence').select('*').eq('household_id', householdId),
+        supabase.from('transport_leg').select('*').eq('household_id', householdId),
+        supabase.from('schedule_template').select('*').eq('household_id', householdId),
+        supabase.from('location').select('*').eq('household_id', householdId),
+        supabase.from('travel_time').select('*').eq('household_id', householdId),
+      ])
+
+      const occs  = occRes.data  ?? []
+      const legs  = legRes.data  ?? []
+      const tpls  = tplRes.data  ?? []
+      const locs  = locRes.data  ?? []
+      const tts   = ttRes.data   ?? []
+
+      // ── 1. Nincs otthoni helyszín ──────────────────────────────────────
+      const homeLoc = locs.find((l: Location) => l.is_home)
+      if (!homeLoc) {
+        results.push({ id: 'no_home', severity: 'error', label: 'Nincs otthoni helyszín (is_home = true)' })
+      } else {
+        results.push({ id: 'home_ok', severity: 'ok', label: `Otthoni helyszín: ${homeLoc.name}` })
+      }
+
+      // ── 2. Tervezett alkalmak leg nélkül ──────────────────────────────
+      const legsByOcc = new Map<string, { dropoff: boolean; pickup: boolean }>()
+      for (const l of legs) {
+        const e = legsByOcc.get(l.occurrence_id) ?? { dropoff: false, pickup: false }
+        if (l.direction === 'dropoff') e.dropoff = true
+        if (l.direction === 'pickup')  e.pickup  = true
+        legsByOcc.set(l.occurrence_id, e)
+      }
+
+      const plannedNoLeg = occs.filter((o: Record<string, unknown>) =>
+        o.status === 'planned' && (o.needs_dropoff || o.needs_pickup) && !legsByOcc.has(o.id as string)
+      )
+      if (plannedNoLeg.length === 0) {
+        results.push({ id: 'legs_ok', severity: 'ok', label: 'Minden tervezett alkalom rendelkezik transport leg-gel' })
+      } else {
+        results.push({
+          id: 'legs_missing', severity: 'warn',
+          label: `${plannedNoLeg.length} tervezett alkalom leg nélkül`,
+          detail: plannedNoLeg.slice(0, 5).map((o: Record<string, unknown>) => `${o.on_date} ${o.title}`).join(', ') + (plannedNoLeg.length > 5 ? '…' : ''),
+        })
+      }
+
+      // ── 3. Hiányos leg (kell dropoff, de nincs / kell pickup, de nincs) ─
+      const incompleteLegs = occs.filter((o: Record<string, unknown>) => {
+        if (o.status !== 'planned') return false
+        const e = legsByOcc.get(o.id as string)
+        if (!e) return false
+        return (o.needs_dropoff && !e.dropoff) || (o.needs_pickup && !e.pickup)
+      })
+      if (incompleteLegs.length === 0) {
+        results.push({ id: 'legs_complete_ok', severity: 'ok', label: 'Leg irányok teljesek (dropoff/pickup)' })
+      } else {
+        results.push({
+          id: 'legs_incomplete', severity: 'warn',
+          label: `${incompleteLegs.length} alkalom hiányos leg-iránnyal`,
+          detail: incompleteLegs.slice(0, 5).map((o: Record<string, unknown>) => `${o.on_date} ${o.title}`).join(', '),
+        })
+      }
+
+      // ── 4. Lemondott alkalom, de még van leg-je ────────────────────────
+      const cancelledWithLegs = occs.filter((o: Record<string, unknown>) =>
+        o.status === 'cancelled' && legsByOcc.has(o.id as string)
+      )
+      if (cancelledWithLegs.length === 0) {
+        results.push({ id: 'cancelled_ok', severity: 'ok', label: 'Lemondott alkalmakhoz nincs transport leg' })
+      } else {
+        results.push({
+          id: 'cancelled_legs', severity: 'error',
+          label: `${cancelledWithLegs.length} lemondott alkalom még rendelkezik leg-gel`,
+          detail: cancelledWithLegs.slice(0, 5).map((o: Record<string, unknown>) => `${o.on_date} ${o.title}`).join(', '),
+        })
+      }
+
+      // ── 5. Leg sofőr nélkül ────────────────────────────────────────────
+      const legNoDriver = legs.filter((l: Record<string, unknown>) => !l.driver_id)
+      if (legNoDriver.length === 0) {
+        results.push({ id: 'driver_ok', severity: 'ok', label: 'Minden leg rendelkezik sofőrrel' })
+      } else {
+        results.push({
+          id: 'driver_missing', severity: 'warn',
+          label: `${legNoDriver.length} leg sofőr nélkül`,
+        })
+      }
+
+      // ── 6. Árva leg (occurrence nem létezik) ──────────────────────────
+      const occIds = new Set(occs.map((o: Record<string, unknown>) => o.id as string))
+      const orphanLegs = legs.filter((l: Record<string, unknown>) => !occIds.has(l.occurrence_id as string))
+      if (orphanLegs.length === 0) {
+        results.push({ id: 'orphan_ok', severity: 'ok', label: 'Nincs árva transport leg' })
+      } else {
+        results.push({
+          id: 'orphan_legs', severity: 'error',
+          label: `${orphanLegs.length} árva transport leg (ismeretlen occurrence_id)`,
+        })
+      }
+
+      // ── 7. Sablonok overlap (azonos személy + hét napja, átfedő dátumok) ─
+      let overlapCount = 0
+      for (let i = 0; i < tpls.length; i++) {
+        for (let j = i + 1; j < tpls.length; j++) {
+          const a = tpls[i], b = tpls[j]
+          if (a.person_id !== b.person_id || a.weekday !== b.weekday) continue
+          const aFrom = a.valid_from, aTo = a.valid_to ?? '9999-12-31'
+          const bFrom = b.valid_from, bTo = b.valid_to ?? '9999-12-31'
+          if (aFrom <= bTo && bFrom <= aTo) overlapCount++
+        }
+      }
+      if (overlapCount === 0) {
+        results.push({ id: 'tpl_overlap_ok', severity: 'ok', label: 'Sablon dátumok nem fedik át egymást' })
+      } else {
+        results.push({
+          id: 'tpl_overlap', severity: 'error',
+          label: `${overlapCount} sablon dátum-átfedés (azonos személy + hét napja)`,
+        })
+      }
+
+      // ── 8. Hiányzó útidők a sablonok helyszíneihez ───────────────────
+      if (homeLoc) {
+        const locUsedInTpls = new Set(tpls.map((t: Record<string, unknown>) => t.location_id as string))
+        const ttSet = new Set(tts.map((t: Record<string, unknown>) => `${t.from_location}→${t.to_location}`))
+        const missingRoutes: string[] = []
+        for (const locId of locUsedInTpls) {
+          if (locId === homeLoc.id) continue
+          const loc = locs.find((l: Location) => l.id === locId)
+          const name = loc?.name ?? locId
+          if (!ttSet.has(`${homeLoc.id}→${locId}`)) missingRoutes.push(`Otthon→${name}`)
+          if (!ttSet.has(`${locId}→${homeLoc.id}`)) missingRoutes.push(`${name}→Otthon`)
+        }
+        if (missingRoutes.length === 0) {
+          results.push({ id: 'tt_ok', severity: 'ok', label: 'Minden sablon-helyszínhez van útidő (oda+vissza)' })
+        } else {
+          results.push({
+            id: 'tt_missing', severity: 'warn',
+            label: `Hiányzó útidők: ${missingRoutes.join(', ')}`,
+          })
+        }
+      }
+
+      // ── 9. Occurrence starts_at < ends_at ellenőrzés ─────────────────
+      const badTimes = occs.filter((o: Record<string, unknown>) =>
+        o.starts_at && o.ends_at && (o.starts_at as string) >= (o.ends_at as string)
+      )
+      if (badTimes.length === 0) {
+        results.push({ id: 'times_ok', severity: 'ok', label: 'Minden alkalom időtartama helyes (starts_at < ends_at)' })
+      } else {
+        results.push({
+          id: 'times_bad', severity: 'error',
+          label: `${badTimes.length} alkalom hibás időtartammal (starts_at >= ends_at)`,
+          detail: badTimes.slice(0, 3).map((o: Record<string, unknown>) => `${o.on_date} ${o.title} ${o.starts_at}–${o.ends_at}`).join(', '),
+        })
+      }
+
+      // ── 10. Összesítő ─────────────────────────────────────────────────
+      const errCount  = results.filter(r => r.severity === 'error').length
+      const warnCount = results.filter(r => r.severity === 'warn').length
+      results.unshift({
+        id: 'summary',
+        severity: errCount > 0 ? 'error' : warnCount > 0 ? 'warn' : 'ok',
+        label: errCount === 0 && warnCount === 0
+          ? `✅ Minden ellenőrzés sikeres (${occs.length} alkalom, ${legs.length} leg, ${tpls.length} sablon)`
+          : `${errCount} hiba · ${warnCount} figyelmeztetés (${occs.length} alkalom, ${legs.length} leg)`,
+      })
+
+    } catch (e: unknown) {
+      results.push({ id: 'fetch_error', severity: 'error', label: 'Lekérési hiba: ' + (e instanceof Error ? e.message : String(e)) })
+    }
+
+    setDiagResults(results)
+    setDiagRunning(false)
   }
 
   return (
@@ -795,6 +985,53 @@ export function Beallitasok() {
                     )
                   })}
                 </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === 'diagnozis' && (
+          <div style={{ padding: '16px' }}>
+            <p style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 16 }}>
+              Ellenőrzi az adatbázis koherenciáját: transport leg-ek, időtartamok, sablon-átfedések, útidők.
+            </p>
+            <button
+              onClick={runDiagnosis}
+              disabled={diagRunning}
+              style={{
+                width: '100%', padding: '12px 0', borderRadius: 10, fontSize: 14,
+                fontWeight: 700, background: 'var(--color-blue)', color: '#fff',
+                border: 'none', cursor: diagRunning ? 'not-allowed' : 'pointer',
+                opacity: diagRunning ? 0.7 : 1, marginBottom: 20,
+              }}
+            >{diagRunning ? '🔍 Ellenőrzés…' : '🔍 Diagnózis futtatása'}</button>
+
+            {diagResults && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {diagResults.map(r => (
+                  <div key={r.id} style={{
+                    padding: '10px 14px', borderRadius: 8, fontSize: 13,
+                    background: r.severity === 'ok'    ? 'rgba(16,185,129,0.08)'
+                              : r.severity === 'warn'  ? 'rgba(245,158,11,0.08)'
+                              : 'rgba(239,68,68,0.08)',
+                    border: `1px solid ${
+                      r.severity === 'ok'   ? 'rgba(16,185,129,0.25)' :
+                      r.severity === 'warn' ? 'rgba(245,158,11,0.25)' :
+                                              'rgba(239,68,68,0.25)'}`,
+                    color: r.id === 'summary' ? 'var(--color-text)' : 'var(--color-muted)',
+                    fontWeight: r.id === 'summary' ? 700 : 400,
+                  }}>
+                    <span style={{ marginRight: 6 }}>
+                      {r.severity === 'ok' ? '✅' : r.severity === 'warn' ? '⚠️' : '❌'}
+                    </span>
+                    {r.label}
+                    {r.detail && (
+                      <div style={{ marginTop: 4, fontSize: 11, color: 'var(--color-muted)', opacity: 0.8 }}>
+                        {r.detail}
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
             )}
           </div>
