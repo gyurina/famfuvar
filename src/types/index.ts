@@ -87,6 +87,7 @@ export interface Occurrence {
   note: string | null
   updated_by: string | null
   updated_at: string
+  is_override: boolean
 }
 
 export interface TransportLeg {

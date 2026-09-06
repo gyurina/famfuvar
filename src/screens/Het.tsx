@@ -5,15 +5,19 @@ import { Header } from '../components/Header'
 import { supabase } from '../lib/supabase'
 import { useHousehold } from '../hooks/useHousehold'
 import { getPref, PREF_HIDE_CANCELLED } from '../lib/prefs'
-import type { Occurrence, TransportLeg } from '../types'
+import type { Occurrence, TransportLeg, ScheduleTemplate } from '../types'
+import { OccurrenceOverrideModal } from '../components/OccurrenceOverrideModal'
 
 type OccWithLegs = Occurrence & { legs: TransportLeg[] }
 
 export function Het() {
-  const { householdId, personById, locationById } = useHousehold()
+  const { householdId, personById, locationById, locations } = useHousehold()
   const [weekOffset, setWeekOffset] = useState(0)
   const [items, setItems] = useState<OccWithLegs[]>([])
   const [loading, setLoading] = useState(true)
+  const [templates, setTemplates] = useState<ScheduleTemplate[]>([])
+  const [selectedOcc, setSelectedOcc] = useState<Occurrence | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
   const hideCancelled = getPref(PREF_HIDE_CANCELLED)
 
   const today     = new Date()
@@ -36,13 +40,16 @@ export function Het() {
         .gte('depart_at', days[0].toISOString())
         .lte('depart_at', days[6].toISOString())
         .order('depart_at'),
-    ]).then(([occRes, legRes]) => {
+      supabase.from('schedule_template').select('*')
+        .eq('household_id', householdId),
+    ]).then(([occRes, legRes, tplRes]) => {
       const occs = (occRes.data ?? []) as Occurrence[]
       const legs = (legRes.data ?? []) as TransportLeg[]
       setItems(occs.map(o => ({ ...o, legs: legs.filter(l => l.occurrence_id === o.id) })))
+      setTemplates((tplRes.data ?? []) as ScheduleTemplate[])
       setLoading(false)
     })
-  }, [householdId, weekOffset])
+  }, [householdId, weekOffset, reloadKey])
 
   // Build transfer map: legId → { pairedLegId, pairedOccTitle, pairedDirection }
   const transferMap = new Map<string, { pairedLegId: string; pairedOccTitle: string; pairedDir: string }>()
@@ -181,14 +188,30 @@ export function Het() {
                             {child && (
                               <span style={{ fontSize: 11, color: child.color, fontWeight: 600 }}>{child.display_name}</span>
                             )}
+                            {occ.is_override && !cancelled && (
+                              <span title="Manuálisan módosított" style={{ fontSize: 11, color: 'var(--color-yellow)' }}>✏️</span>
+                            )}
                           </div>
                           {loc && !loc.is_home && (
                             <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2 }}>📍 {loc.name}</div>
                           )}
                           {cancelled && (
-                            <div style={{ fontSize: 11, color: 'var(--color-yellow)', marginTop: 3, fontWeight: 600 }}>ELMARAD</div>
+                            <div style={{ fontSize: 11, color: 'var(--color-yellow)', marginTop: 3, fontWeight: 600 }}>🚫 ELMARAD</div>
+                          )}
+                          {occ.note && !cancelled && (
+                            <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2, fontStyle: 'italic' }}>{occ.note}</div>
                           )}
                         </div>
+                        {/* ••• gomb */}
+                        <button
+                          onClick={() => setSelectedOcc(occ)}
+                          style={{
+                            padding: '10px 12px', background: 'none', border: 'none',
+                            cursor: 'pointer', color: 'var(--color-muted)',
+                            fontSize: 18, lineHeight: 1, alignSelf: 'flex-start',
+                          }}
+                          title="Módosítás / Lemondás"
+                        >⋯</button>
                       </div>
 
                       {/* Transport legs */}
@@ -248,6 +271,20 @@ export function Het() {
             </div>
           ))}
         </div>
+      )}
+
+      {/* Override modal */}
+      {selectedOcc && (
+        <OccurrenceOverrideModal
+          occ={selectedOcc}
+          template={templates.find(t => t.id === selectedOcc.template_id) ?? null}
+          locations={locations}
+          onClose={() => setSelectedOcc(null)}
+          onDone={() => {
+            setSelectedOcc(null)
+            setReloadKey(k => k + 1)
+          }}
+        />
       )}
     </div>
   )

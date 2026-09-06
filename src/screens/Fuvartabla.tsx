@@ -6,7 +6,8 @@ import { supabase } from '../lib/supabase'
 import { useHousehold } from '../hooks/useHousehold'
 import { useAuth } from '../lib/auth'
 import { getPref, PREF_HIDE_CANCELLED } from '../lib/prefs'
-import type { TransportLeg, Occurrence } from '../types'
+import type { TransportLeg, Occurrence, ScheduleTemplate } from '../types'
+import { OccurrenceOverrideModal } from '../components/OccurrenceOverrideModal'
 
 type LegRow = TransportLeg & {
   occurrence: Occurrence
@@ -16,7 +17,7 @@ type LegRow = TransportLeg & {
 
 export function Fuvartabla() {
   const { person } = useAuth()
-  const { drivers, householdId, personById, locationById } = useHousehold()
+  const { drivers, householdId, personById, locationById, locations } = useHousehold()
   const [weekOffset, setWeekOffset] = useState(0)
   const [legs, setLegs] = useState<LegRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -28,6 +29,9 @@ export function Fuvartabla() {
   const [returnAlso, setReturnAlso] = useState(false)
   const [transitAlso, setTransitAlso] = useState(false)
   const [assigning, setAssigning] = useState(false)
+  const [templates, setTemplates] = useState<ScheduleTemplate[]>([])
+  const [selectedOcc, setSelectedOcc] = useState<Occurrence | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
 
   const hideCancelled = getPref(PREF_HIDE_CANCELLED)
   const today     = new Date()
@@ -39,12 +43,19 @@ export function Fuvartabla() {
     const from = days[0].toISOString()
     const to   = days[6].toISOString()
     setLoading(true)
-    supabase.from('transport_leg').select('*, occurrence!inner(*)')
-      .eq('household_id', householdId)
-      .gte('depart_at', from).lte('depart_at', to)
-      .order('depart_at')
-      .then(({ data }) => { setLegs((data as any) ?? []); setLoading(false) })
-  }, [householdId, weekOffset])
+    Promise.all([
+      supabase.from('transport_leg').select('*, occurrence!inner(*)')
+        .eq('household_id', householdId)
+        .gte('depart_at', from).lte('depart_at', to)
+        .order('depart_at'),
+      supabase.from('schedule_template').select('*')
+        .eq('household_id', householdId),
+    ]).then(([legRes, tplRes]) => {
+      setLegs((legRes.data as any) ?? [])
+      setTemplates((tplRes.data ?? []) as ScheduleTemplate[])
+      setLoading(false)
+    })
+  }, [householdId, weekOffset, reloadKey])
 
   function openLeg(legId: string) {
     if (openLegId === legId) {
@@ -166,6 +177,8 @@ export function Fuvartabla() {
   const allAssigned = visLegs.length > 0 && orphans.length === 0
   const bannerClass = allAssigned ? 'ok' : orphans.length ? 'warn' : 'neutral'
 
+  const seenOccIds = new Set<string>()
+
   const grouped = days.map(d => {
     let dayLegs = visLegs.filter(l => l.depart_at.startsWith(format(d, 'yyyy-MM-dd')))
     if (filter === 'mine' && myId) {
@@ -263,7 +276,7 @@ export function Fuvartabla() {
                       <div className="leg-card-stripe" style={{ background: stripe }} />
                       <div className="leg-card-body">
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                             <span style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
                               {format(new Date(leg.depart_at), 'HH:mm')}
                             </span>
@@ -271,6 +284,20 @@ export function Fuvartabla() {
                               {leg.direction === 'dropoff' ? '→' : '←'} {occ?.title ?? '?'}
                             </span>
                             {child && <span style={{ fontSize: 11, color: child.color, fontWeight: 600 }}>({child.display_name})</span>}
+                            {occ?.is_override && occ.status !== 'cancelled' && (
+                              <span title="Módosított" style={{ fontSize: 11 }}>✏️</span>
+                            )}
+                            {(() => {
+                              if (!occ || seenOccIds.has(occ.id)) return null
+                              seenOccIds.add(occ.id)
+                              return (
+                                <button
+                                  onClick={e => { e.stopPropagation(); setSelectedOcc(occ as Occurrence) }}
+                                  style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-muted)', fontSize: 16, padding: '0 4px', lineHeight: 1 }}
+                                  title="Módosítás / Lemondás"
+                                >⋯</button>
+                              )
+                            })()}
                           </div>
                           {(fromLoc || toLoc) && (
                             <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2 }}>
@@ -445,6 +472,20 @@ export function Fuvartabla() {
             </div>
           ))}
         </div>
+      )}
+
+      {/* Override modal */}
+      {selectedOcc && (
+        <OccurrenceOverrideModal
+          occ={selectedOcc}
+          template={templates.find(t => t.id === selectedOcc.template_id) ?? null}
+          locations={locations}
+          onClose={() => setSelectedOcc(null)}
+          onDone={() => {
+            setSelectedOcc(null)
+            setReloadKey(k => k + 1)
+          }}
+        />
       )}
     </div>
   )
