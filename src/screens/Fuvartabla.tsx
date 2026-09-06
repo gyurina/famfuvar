@@ -8,6 +8,9 @@ import { useAuth } from '../lib/auth'
 import { getPref, PREF_HIDE_CANCELLED } from '../lib/prefs'
 import type { TransportLeg, Occurrence, ScheduleTemplate } from '../types'
 import { OccurrenceOverrideModal } from '../components/OccurrenceOverrideModal'
+import { useOnlineStatus } from '../hooks/useOnlineStatus'
+import { queueAssignDriver } from '../lib/sync'
+import { db } from '../lib/db'
 
 type LegRow = TransportLeg & {
   occurrence: Occurrence
@@ -18,6 +21,7 @@ type LegRow = TransportLeg & {
 export function Fuvartabla() {
   const { person } = useAuth()
   const { drivers, householdId, personById, locationById, locations } = useHousehold()
+  const online = useOnlineStatus()
   const [weekOffset, setWeekOffset] = useState(0)
   const [legs, setLegs] = useState<LegRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -43,6 +47,21 @@ export function Fuvartabla() {
     const from = days[0].toISOString()
     const to   = days[6].toISOString()
     setLoading(true)
+
+    // Offline: azonnal Dexie-ből töltünk
+    if (!online) {
+      db.transport_legs
+        .where('depart_at').between(from, to, true, true)
+        .filter(l => l.household_id === householdId)
+        .toArray()
+        .then(cached => {
+          setLegs(cached as any)
+          setLoading(false)
+        })
+        .catch(() => setLoading(false))
+      return
+    }
+
     Promise.all([
       supabase.from('transport_leg').select('*, occurrence!inner(*)')
         .eq('household_id', householdId)
@@ -51,8 +70,19 @@ export function Fuvartabla() {
       supabase.from('schedule_template').select('*')
         .eq('household_id', householdId),
     ]).then(([legRes, tplRes]) => {
-      setLegs((legRes.data as any) ?? [])
+      const legData = (legRes.data as any) ?? []
+      setLegs(legData)
+      // Cache legs for offline use
+      db.transport_legs.bulkPut(legData).catch(() => {})
       setTemplates((tplRes.data ?? []) as ScheduleTemplate[])
+      setLoading(false)
+    }).catch(async () => {
+      // Supabase hiba → Dexie fallback
+      const cached = await db.transport_legs
+        .where('depart_at').between(from, to, true, true)
+        .filter(l => l.household_id === householdId)
+        .toArray()
+      setLegs(cached as any)
       setLoading(false)
     })
   }, [householdId, weekOffset, reloadKey])
@@ -181,10 +211,33 @@ export function Fuvartabla() {
     selfTransport = false,
   ) {
     if (!silent) setAssigning(true)
+
+    // Offline mód: sorba helyezzük, optimista UI-frissítés
+    if (!online) {
+      await queueAssignDriver({
+        leg_id: legId, driver_id: driverId,
+        companion_id: comp1, companion2_id: comp2, self_transport: selfTransport,
+      })
+      setLegs(prev => prev.map(l => l.id === legId
+        ? { ...l, driver_id: driverId, companion_id: comp1, companion2_id: comp2, self_transport: selfTransport }
+        : l
+      ))
+      if (!silent) {
+        setOpenLegId(null); setPickerStep('driver'); setPendingDriverId(null)
+        setSelectedCompanions([]); setReturnAlso(false); setTransitAlso(false)
+        setAssigning(false)
+      }
+      return
+    }
+
     const { data } = await supabase.from('transport_leg')
       .update({ driver_id: driverId, companion_id: comp1, companion2_id: comp2, self_transport: selfTransport })
       .eq('id', legId).select('*, occurrence!inner(*)').single()
-    if (data) setLegs(prev => prev.map(l => l.id === legId ? data as any : l))
+    if (data) {
+      setLegs(prev => prev.map(l => l.id === legId ? data as any : l))
+      // Cache frissítés
+      db.transport_legs.put(data as any).catch(() => {})
+    }
     // Push értesítés a sofőrnek (fire-and-forget)
     if (driverId && !selfTransport) {
       supabase.functions.invoke('notify-driver', { body: { leg_id: legId } })

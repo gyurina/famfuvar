@@ -8,6 +8,7 @@ import { Het } from './screens/Het'
 import { Sablon } from './screens/Sablon'
 import { Esemeny } from './screens/Esemeny'
 import { Beallitasok } from './screens/Beallitasok'
+import { OfflineBanner } from './components/OfflineBanner'
 
 function AppShell() {
   const { session, loading } = useAuth()
@@ -24,6 +25,7 @@ function AppShell() {
 
   return (
     <div className="min-h-dvh">
+      <OfflineBanner />
       <Routes>
         <Route path="/"            element={<Ma />} />
         <Route path="/fuvar"       element={<Fuvartabla />} />

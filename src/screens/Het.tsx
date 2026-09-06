@@ -7,6 +7,7 @@ import { useHousehold } from '../hooks/useHousehold'
 import { getPref, PREF_HIDE_CANCELLED } from '../lib/prefs'
 import type { Occurrence, TransportLeg, ScheduleTemplate } from '../types'
 import { OccurrenceOverrideModal } from '../components/OccurrenceOverrideModal'
+import { db } from '../lib/db'
 
 type OccWithLegs = Occurrence & { legs: TransportLeg[] }
 
@@ -47,6 +48,23 @@ export function Het() {
       const legs = (legRes.data ?? []) as TransportLeg[]
       setItems(occs.map(o => ({ ...o, legs: legs.filter(l => l.occurrence_id === o.id) })))
       setTemplates((tplRes.data ?? []) as ScheduleTemplate[])
+      setLoading(false)
+      // Cache for offline use
+      db.occurrences.bulkPut(occs).catch(() => {})
+      db.transport_legs.bulkPut(legs).catch(() => {})
+    }).catch(async () => {
+      // Supabase hiba / offline → Dexie fallback
+      try {
+        const cachedOccs = await db.occurrences
+          .where('on_date').between(from, to, true, true)
+          .filter(o => o.household_id === householdId)
+          .toArray()
+        const occIds = cachedOccs.map(o => o.id)
+        const cachedLegs = occIds.length
+          ? await db.transport_legs.where('occurrence_id').anyOf(occIds).toArray()
+          : []
+        setItems(cachedOccs.map(o => ({ ...o, legs: cachedLegs.filter(l => l.occurrence_id === o.id) })))
+      } catch { /* ignore */ }
       setLoading(false)
     })
   }, [householdId, weekOffset, reloadKey])

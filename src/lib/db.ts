@@ -3,6 +3,7 @@
  * A Supabase Realtime frissíti szinkronban.
  */
 import Dexie, { type EntityTable } from 'dexie'
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import type {
   Occurrence, TransportLeg, Person, Location,
   ScheduleTemplate, TravelGroup, TravelGroupMember,
@@ -22,6 +23,8 @@ class FamCalDB extends Dexie {
   ext_calendars!:     EntityTable<ExternalCalendar, 'id'>
   ext_events!:        EntityTable<ExternalEvent,    'id'>
 
+  sync_queue!: EntityTable<SyncQueueItem, 'id'>
+
   constructor() {
     super('famcal')
     this.version(1).stores({
@@ -37,7 +40,17 @@ class FamCalDB extends Dexie {
       ext_calendars:  'id, household_id, person_id',
       ext_events:     'id, calendar_id, starts_at',
     })
+    this.version(2).stores({
+      sync_queue: '++id, action, created_at',
+    })
   }
+}
+
+export interface SyncQueueItem {
+  id?: number
+  action: 'ASSIGN_DRIVER'
+  payload: Record<string, unknown>
+  created_at: number
 }
 
 export const db = new FamCalDB()
