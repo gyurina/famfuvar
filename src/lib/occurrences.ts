@@ -317,3 +317,18 @@ export async function resetOccurrenceToTemplate(
     })
   }
 }
+
+// ── Leg újragenerálás kényszerítése (diagnózis javítás) ──────────────────────
+export async function forceRegenerateLegs(occurrenceId: string): Promise<void> {
+  const { data: occ, error } = await supabase
+    .from('occurrence')
+    .select('*')
+    .eq('id', occurrenceId)
+    .single()
+  if (error || !occ) throw error ?? new Error('Occurrence nem található')
+  await regenerateLegs(occ, {
+    starts_at:   occ.starts_at,
+    ends_at:     occ.ends_at,
+    location_id: occ.location_id,
+  })
+}

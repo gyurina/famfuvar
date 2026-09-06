@@ -7,6 +7,7 @@ import { getPref, setPref, PREF_HIDE_CANCELLED } from '../lib/prefs'
 import type { ExternalCalendar, Location, TravelTime, DriverAvailability } from '../types'
 import { isPushSupported, isPushSubscribed, subscribeToPush, unsubscribeFromPush } from '../lib/push'
 import { startGoogleAuth, syncNow, disconnectGoogle, fetchGoogleCalendars } from '../lib/googleCalendar'
+import { forceRegenerateLegs } from '../lib/occurrences'
 import { format } from 'date-fns'
 
 const WEEKDAYS = ['Hétfő','Kedd','Szerda','Csütörtök','Péntek','Szombat','Vasárnap']
@@ -263,10 +264,33 @@ export function Beallitasok() {
 
   // ── Diagnózis state ──────────────────────────────────────────────────────
   type DiagSeverity = 'ok' | 'warn' | 'error'
-  type DiagResult = { id: string; severity: DiagSeverity; label: string; detail?: string }
+  type DiagResult = { id: string; severity: DiagSeverity; label: string; detail?: string; fixable?: boolean; fixIds?: string[] }
 
   const [diagRunning, setDiagRunning] = useState(false)
   const [diagResults, setDiagResults] = useState<DiagResult[] | null>(null)
+  const [fixingId, setFixingId] = useState<string | null>(null)
+
+  async function fixResult(r: DiagResult) {
+    if (!r.fixIds?.length) return
+    setFixingId(r.id)
+    try {
+      if (r.id === 'cancelled_legs' || r.id === 'orphan_legs') {
+        // Leg-ek törlése
+        for (const legId of r.fixIds) {
+          await supabase.from('transport_leg').delete().eq('id', legId)
+        }
+      } else if (r.id === 'legs_missing' || r.id === 'legs_incomplete') {
+        // Leg regeneráció occurrence-ként
+        for (const occId of r.fixIds) {
+          await forceRegenerateLegs(occId)
+        }
+      }
+      await runDiagnosis()
+    } catch (e: unknown) {
+      alert('Javítási hiba: ' + (e instanceof Error ? e.message : String(e)))
+    }
+    setFixingId(null)
+  }
 
   async function runDiagnosis() {
     if (!householdId) return
@@ -317,6 +341,8 @@ export function Beallitasok() {
           id: 'legs_missing', severity: 'warn',
           label: `${plannedNoLeg.length} tervezett alkalom leg nélkül`,
           detail: plannedNoLeg.slice(0, 5).map((o: Record<string, unknown>) => `${o.on_date} ${o.title}`).join(', ') + (plannedNoLeg.length > 5 ? '…' : ''),
+          fixable: true,
+          fixIds: plannedNoLeg.map((o: Record<string, unknown>) => o.id as string),
         })
       }
 
@@ -334,6 +360,8 @@ export function Beallitasok() {
           id: 'legs_incomplete', severity: 'warn',
           label: `${incompleteLegs.length} alkalom hiányos leg-iránnyal`,
           detail: incompleteLegs.slice(0, 5).map((o: Record<string, unknown>) => `${o.on_date} ${o.title}`).join(', '),
+          fixable: true,
+          fixIds: incompleteLegs.map((o: Record<string, unknown>) => o.id as string),
         })
       }
 
@@ -344,10 +372,15 @@ export function Beallitasok() {
       if (cancelledWithLegs.length === 0) {
         results.push({ id: 'cancelled_ok', severity: 'ok', label: 'Lemondott alkalmakhoz nincs transport leg' })
       } else {
+        const cancelledLegIds = legs
+          .filter((l: Record<string, unknown>) => cancelledWithLegs.some((o: Record<string, unknown>) => o.id === l.occurrence_id))
+          .map((l: Record<string, unknown>) => l.id as string)
         results.push({
           id: 'cancelled_legs', severity: 'error',
           label: `${cancelledWithLegs.length} lemondott alkalom még rendelkezik leg-gel`,
           detail: cancelledWithLegs.slice(0, 5).map((o: Record<string, unknown>) => `${o.on_date} ${o.title}`).join(', '),
+          fixable: true,
+          fixIds: cancelledLegIds,
         })
       }
 
@@ -371,6 +404,8 @@ export function Beallitasok() {
         results.push({
           id: 'orphan_legs', severity: 'error',
           label: `${orphanLegs.length} árva transport leg (ismeretlen occurrence_id)`,
+          fixable: true,
+          fixIds: orphanLegs.map((l: Record<string, unknown>) => l.id as string),
         })
       }
 
@@ -1021,15 +1056,31 @@ export function Beallitasok() {
                     color: r.id === 'summary' ? 'var(--color-text)' : 'var(--color-muted)',
                     fontWeight: r.id === 'summary' ? 700 : 400,
                   }}>
-                    <span style={{ marginRight: 6 }}>
-                      {r.severity === 'ok' ? '✅' : r.severity === 'warn' ? '⚠️' : '❌'}
-                    </span>
-                    {r.label}
-                    {r.detail && (
-                      <div style={{ marginTop: 4, fontSize: 11, color: 'var(--color-muted)', opacity: 0.8 }}>
-                        {r.detail}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                      <div style={{ flex: 1 }}>
+                        <span style={{ marginRight: 6 }}>
+                          {r.severity === 'ok' ? '✅' : r.severity === 'warn' ? '⚠️' : '❌'}
+                        </span>
+                        {r.label}
+                        {r.detail && (
+                          <div style={{ marginTop: 4, fontSize: 11, color: 'var(--color-muted)', opacity: 0.8 }}>
+                            {r.detail}
+                          </div>
+                        )}
                       </div>
-                    )}
+                      {r.fixable && (
+                        <button
+                          onClick={() => fixResult(r)}
+                          disabled={fixingId !== null}
+                          style={{
+                            flexShrink: 0, padding: '4px 10px', borderRadius: 6,
+                            fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                            background: 'var(--color-blue)', color: '#fff',
+                            border: 'none', opacity: fixingId === r.id ? 0.6 : 1,
+                          }}
+                        >{fixingId === r.id ? '…' : '🔧 Javítás'}</button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
