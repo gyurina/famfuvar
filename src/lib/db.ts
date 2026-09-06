@@ -7,7 +7,8 @@ import Dexie, { type EntityTable } from 'dexie'
 import type {
   Occurrence, TransportLeg, Person, Location,
   ScheduleTemplate, TravelGroup, TravelGroupMember,
-  DriverAvailability, TravelTime, ExternalCalendar, ExternalEvent
+  DriverAvailability, TravelTime, ExternalCalendar, ExternalEvent,
+  Trip,
 } from '../types'
 
 class FamCalDB extends Dexie {
@@ -22,8 +23,8 @@ class FamCalDB extends Dexie {
   travel_times!:      EntityTable<TravelTime,       'from_location'>
   ext_calendars!:     EntityTable<ExternalCalendar, 'id'>
   ext_events!:        EntityTable<ExternalEvent,    'id'>
-
-  sync_queue!: EntityTable<SyncQueueItem, 'id'>
+  trips!:             EntityTable<Trip,             'id'>
+  sync_queue!:        EntityTable<SyncQueueItem,    'id'>
 
   constructor() {
     super('famcal')
@@ -42,6 +43,12 @@ class FamCalDB extends Dexie {
     })
     this.version(2).stores({
       sync_queue: '++id, action, created_at',
+    })
+    this.version(3).stores({
+      // trip_id index a transport_legs-en
+      transport_legs: 'id, household_id, occurrence_id, direction, driver_id, depart_at, trip_id',
+      // trips tábla offline cache
+      trips: 'id, household_id',
     })
   }
 }

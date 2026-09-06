@@ -54,13 +54,13 @@ export interface ScheduleTemplate {
   household_id: string
   person_id: string
   title: string
-  weekday: number          // 1=Hétfő … 7=Vasárnap
-  starts_at: string        // 'HH:mm:ss'
+  weekday: number
+  starts_at: string
   ends_at: string
   location_id: string
   needs_dropoff: boolean
   needs_pickup: boolean
-  valid_from: string       // date
+  valid_from: string
   valid_to: string | null
 }
 
@@ -79,7 +79,7 @@ export interface Occurrence {
   template_id: string | null
   person_id: string
   title: string
-  on_date: string          // date
+  on_date: string
   starts_at: string
   ends_at: string
   location_id: string
@@ -88,6 +88,12 @@ export interface Occurrence {
   updated_by: string | null
   updated_at: string
   is_override: boolean
+}
+
+export interface Trip {
+  id: string
+  household_id: string
+  created_at: string
 }
 
 export interface TransportLeg {
@@ -99,12 +105,13 @@ export interface TransportLeg {
   group_id: string | null
   companion_id: string | null
   companion2_id: string | null
-  depart_at: string        // timestamptz
+  depart_at: string
   arrive_at: string
   from_location: string | null
   to_location: string | null
   note: string | null
   self_transport: boolean
+  trip_id: string | null
 }
 
 export interface ExternalCalendar {
