@@ -8,6 +8,7 @@ import { useAuth } from '../lib/auth'
 import { getPref, PREF_HIDE_CANCELLED } from '../lib/prefs'
 import type { TransportLeg, Occurrence, ScheduleTemplate } from '../types'
 import { OccurrenceOverrideModal } from '../components/OccurrenceOverrideModal'
+import DirectionBadge from '../components/DirectionBadge'
 import { useOnlineStatus } from '../hooks/useOnlineStatus'
 import { fetchGoogleCalendars, fetchExternalEvents } from '../lib/googleCalendar'
 import { queueAssignDriver } from '../lib/sync'
@@ -487,7 +488,7 @@ export function Fuvartabla() {
                   {format(new Date(leg.depart_at), 'HH:mm')}
                 </span>
                 <span style={{ fontSize: 13 }}>
-                  {leg.direction === 'dropoff' ? '→' : '←'} {occ?.title ?? '?'}
+                  <DirectionBadge direction={leg.direction} /> {occ?.title ?? '?'}
                 </span>
                 {child && <span style={{ fontSize: 11, color: child.color, fontWeight: 600 }}>({child.display_name})</span>}
                 {occ?.is_override && occ.status !== 'cancelled' && (
@@ -545,7 +546,7 @@ export function Fuvartabla() {
                       background: 'rgba(245,200,66,0.08)', border: '1px solid rgba(245,200,66,0.25)',
                       fontSize: 11, color: 'var(--color-yellow)',
                     }}>
-                      ⚡ <strong>Átszállítás</strong> — {format(new Date(t.depart_at), 'HH:mm')} {t.direction === 'dropoff' ? '→' : '←'} {t.occurrence?.title}.
+                      ⚡ <strong>Átszállítás</strong> — {format(new Date(t.depart_at), 'HH:mm')} <DirectionBadge direction={t.direction} /> {t.occurrence?.title}.
                       Ha ugyanaz a sofőr viszi, közvetlenül mehet tovább.
                     </div>
                   )
@@ -647,7 +648,7 @@ export function Fuvartabla() {
                       }}>✓</span>
                       ⚡ Az átszállítást is ő vigye
                       <span style={{ fontSize: 10, color: 'var(--color-muted)', fontWeight: 400, marginLeft: 2 }}>
-                        ({format(new Date(t.depart_at), 'HH:mm')} {t.direction === 'dropoff' ? '→' : '←'} {t.occurrence?.title})
+                        ({format(new Date(t.depart_at), 'HH:mm')} <DirectionBadge direction={t.direction} /> {t.occurrence?.title})
                       </span>
                     </button>
                   )
@@ -708,7 +709,7 @@ export function Fuvartabla() {
                         <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--color-muted)' }}>
                           {format(new Date(l.depart_at), 'HH:mm')}
                         </span>
-                        <span>{l.direction === 'dropoff' ? '→' : '←'} {l.occurrence?.title ?? '?'}</span>
+                        <span><DirectionBadge direction={l.direction} /> {l.occurrence?.title ?? '?'}</span>
                         {child && <span style={{ color: child.color, fontWeight: 600 }}>({child.display_name})</span>}
                       </div>
                     )

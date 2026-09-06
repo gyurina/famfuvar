@@ -5,7 +5,8 @@ import { Header } from '../components/Header'
 import { supabase } from '../lib/supabase'
 import { useHousehold } from '../hooks/useHousehold'
 import { getPref, PREF_HIDE_CANCELLED } from '../lib/prefs'
-import type { Occurrence, TransportLeg, ScheduleTemplate } from '../types'
+import type { Occurrence, TransportLeg, ScheduleTemplate, LegDirection } from '../types'
+import DirectionBadge from '../components/DirectionBadge'
 import { OccurrenceOverrideModal } from '../components/OccurrenceOverrideModal'
 import { db } from '../lib/db'
 
@@ -247,9 +248,7 @@ export function Het() {
                             const noDriver = !leg!.driver_id && !leg!.self_transport
                             return (
                               <div key={leg!.id} style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                                <span style={{ color: 'var(--color-muted)', fontSize: 11 }}>
-                                  {leg!.direction === 'dropoff' ? '→' : '←'}
-                                </span>
+                                <DirectionBadge direction={leg!.direction} size={12} />
                                 {noDriver ? (
                                   <span style={{
                                     color: 'var(--color-red)', fontWeight: 600, fontSize: 11,
@@ -274,7 +273,7 @@ export function Het() {
                                     border: '1px solid rgba(245,200,66,0.25)',
                                     borderRadius: 4, padding: '1px 6px', flexShrink: 0,
                                   }}>
-                                    ⚡ {transfer.pairedDir === 'dropoff' ? '→' : '←'} {transfer.pairedOccTitle}
+                                    ⚡ <DirectionBadge direction={transfer.pairedDir as LegDirection} size={11} /> {transfer.pairedOccTitle}
                                   </span>
                                 )}
                               </div>
