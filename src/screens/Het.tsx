@@ -201,7 +201,7 @@ export function Het() {
                           {[
                             dropoff ? { leg: dropoff, transfer: dropoffTransfer } : null,
                             pickup  ? { leg: pickup,  transfer: pickupTransfer  } : null,
-                          ].filter(Boolean).map(({ leg, transfer }) => {
+                          ].filter((x): x is NonNullable<typeof x> => x !== null).map(({ leg, transfer }) => {
                             const driver   = personById(leg!.driver_id)
                             const noDriver = !leg!.driver_id
                             return (
