@@ -133,7 +133,7 @@ async function regenerateLegs(
     .select('id')
     .eq('household_id', householdId)
     .eq('is_home', true)
-    .single()
+    .maybeSingle()
 
   if (!homeLoc) {
     // Ha nincs otthoni helyszín, csak töröljük a leg-eket
