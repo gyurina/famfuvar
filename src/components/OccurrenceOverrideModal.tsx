@@ -86,7 +86,6 @@ export function OccurrenceOverrideModal({ occ, template, locations, isAdmin, onC
               starts_at:   startsAt,
               ends_at:     endsAt,
               location_id: locationId,
-              custom_location_text: customLoc || null,
             })
           }
         }

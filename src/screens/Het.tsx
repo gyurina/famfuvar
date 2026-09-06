@@ -9,7 +9,6 @@ import type { Occurrence, TransportLeg, ScheduleTemplate, LegDirection } from '.
 import DirectionBadge from '../components/DirectionBadge'
 import { sortLegs } from '../lib/occurrences'
 import { useRole } from '../hooks/useRole'
-import { sortLegs } from '../lib/occurrences'
 import { OccurrenceOverrideModal } from '../components/OccurrenceOverrideModal'
 import { db } from '../lib/db'
 
@@ -187,10 +186,6 @@ export function Het() {
                   const cancelled = occ.status === 'cancelled'
                   const dropoff  = occ.legs.find(l => l.direction === 'dropoff')
                   const pickup   = occ.legs.find(l => l.direction === 'pickup')
-
-                  // Check if any leg has a transfer pair
-                  const dropoffTransfer = dropoff ? transferMap.get(dropoff.id) : undefined
-                  const pickupTransfer  = pickup  ? transferMap.get(pickup.id)  : undefined
 
                   return (
                     <div key={occ.id} style={{
