@@ -1,63 +1,128 @@
 // supabase/functions/notify-driver/index.ts
-// Sofőr-hozzárendelés push értesítés küldése Web Push (VAPID) protokollal.
-//
-// Szükséges Supabase secrets (supabase secrets set):
-//   VAPID_PUBLIC_KEY=<generated>
-//   VAPID_PRIVATE_KEY=<generated>
-//   VAPID_SUBJECT=mailto:admin@example.com
-//
-// VAPID kulcsgenerálás (egyszer, helyi gépen):
-//   npx web-push generate-vapid-keys
-//   → másold a VITE_VAPID_PUBLIC_KEY értéket az .env.local-ba is
+// RFC 8291 Web Push + VAPID (JWK kulcsimport)
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
-// Egyszerű VAPID-alapú push küldés Deno Web Crypto API-val
-async function importVapidKey(privateKeyB64: string): Promise<CryptoKey> {
-  const raw = Uint8Array.from(atob(privateKeyB64.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0))
-  return crypto.subtle.importKey('raw', raw, { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveKey', 'deriveBits'])
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+const JSON_CORS = { ...CORS, 'Content-Type': 'application/json' }
+
+// ── Segédfüggvények ────────────────────────────────────────────────────────
+
+function b64uDecode(s: string): Uint8Array {
+  // Elfogad base64url és sima base64 formátumot is
+  const base64 = s.replace(/-/g, '+').replace(/_/g, '/')
+  const padded = base64 + '==='.slice((base64.length + 3) % 4)
+  return Uint8Array.from(atob(padded), c => c.charCodeAt(0))
 }
 
-async function buildVapidAuthHeader(
+function b64uEncode(buf: Uint8Array): string {
+  return btoa(String.fromCharCode(...buf))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+}
+
+function concat(...arrs: Uint8Array[]): Uint8Array {
+  const out = new Uint8Array(arrs.reduce((n, a) => n + a.length, 0))
+  let off = 0; for (const a of arrs) { out.set(a, off); off += a.length }
+  return out
+}
+
+async function hmac(key: Uint8Array, data: Uint8Array): Promise<Uint8Array> {
+  const k = await crypto.subtle.importKey('raw', key, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+  return new Uint8Array(await crypto.subtle.sign('HMAC', k, data))
+}
+
+// ── VAPID JWT (JWK kulcsimport — nincs PKCS#8 burkolás) ───────────────────
+
+async function buildVapidHeader(
   endpoint: string,
-  vapidPublicKey: string,
-  vapidPrivateKeyB64: string,
+  vapidPubB64u: string,  // base64url uncompressed P-256 public key (65 bájt)
+  vapidPrivB64u: string, // base64url raw P-256 private scalar (32 bájt)
   subject: string,
 ): Promise<string> {
+  const enc = new TextEncoder()
   const url = new URL(endpoint)
-  const audience = `${url.protocol}//${url.host}`
+  const aud = `${url.protocol}//${url.host}`
   const exp = Math.floor(Date.now() / 1000) + 12 * 3600
 
-  const header  = btoa(JSON.stringify({ typ: 'JWT', alg: 'ES256' })).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_')
-  const payload = btoa(JSON.stringify({ aud: audience, exp, sub: subject })).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_')
-  const data    = `${header}.${payload}`
+  const toB64u = (s: string) => btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+  const hdr  = toB64u(JSON.stringify({ typ: 'JWT', alg: 'ES256' }))
+  const pld  = toB64u(JSON.stringify({ aud, exp, sub: subject }))
+  const data = `${hdr}.${pld}`
 
-  // Import private key as PKCS8 for signing
-  const pkcs8Raw = Uint8Array.from(atob(vapidPrivateKeyB64.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0))
-  const signingKey = await crypto.subtle.importKey(
-    'pkcs8',
-    pkcs8Raw,
+  // Publikus kulcs x,y koordinátái az uncompressed pontból (0x04 || x || y)
+  const pubRaw = b64uDecode(vapidPubB64u)
+  if (pubRaw[0] !== 0x04 || pubRaw.length !== 65) {
+    throw new Error(`invalid VAPID public key length ${pubRaw.length}, first byte 0x${pubRaw[0].toString(16)}`)
+  }
+  const x = b64uEncode(pubRaw.slice(1, 33))
+  const y = b64uEncode(pubRaw.slice(33, 65))
+
+  const sigKey = await crypto.subtle.importKey(
+    'jwk',
+    { kty: 'EC', crv: 'P-256', d: vapidPrivB64u, x, y, key_ops: ['sign'] },
     { name: 'ECDSA', namedCurve: 'P-256' },
     false,
     ['sign'],
   )
 
-  const sig = await crypto.subtle.sign(
-    { name: 'ECDSA', hash: { name: 'SHA-256' } },
-    signingKey,
-    new TextEncoder().encode(data),
-  )
-
-  const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig))).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_')
-  const jwt = `${data}.${sigB64}`
-
-  return `vapid t=${jwt},k=${vapidPublicKey}`
+  const sig    = new Uint8Array(await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, sigKey, enc.encode(data)))
+  const sigB64 = toB64u(String.fromCharCode(...sig))
+  return `vapid t=${data}.${sigB64},k=${vapidPubB64u}`
 }
 
+// ── RFC 8291 Web Push titkosítás ──────────────────────────────────────────
+
+async function encryptWebPush(
+  payload: string,
+  p256dhB64: string,
+  authB64: string,
+): Promise<Uint8Array> {
+  const enc = new TextEncoder()
+  const uaPub      = b64uDecode(p256dhB64)
+  const authSecret = b64uDecode(authB64)
+
+  // Ellenőrzés: a p256dh 65 bájt kell legyen (uncompressed point)
+  if (uaPub.length !== 65) throw new Error(`p256dh length ${uaPub.length}, expected 65`)
+  if (authSecret.length !== 16) throw new Error(`auth length ${authSecret.length}, expected 16`)
+
+  const senderKP = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits'])
+  const asPub    = new Uint8Array(await crypto.subtle.exportKey('raw', senderKP.publicKey))
+
+  const uaKey      = await crypto.subtle.importKey('raw', uaPub, { name: 'ECDH', namedCurve: 'P-256' }, false, [])
+  const ecdhSecret = new Uint8Array(await crypto.subtle.deriveBits({ name: 'ECDH', public: uaKey }, senderKP.privateKey, 256))
+
+  const prkKey  = await hmac(authSecret, ecdhSecret)
+  const keyInfo = concat(enc.encode('WebPush: info\x00'), uaPub, asPub)
+  const ikm     = await hmac(prkKey, concat(keyInfo, new Uint8Array([1])))
+
+  const salt  = crypto.getRandomValues(new Uint8Array(16))
+  const prk   = await hmac(salt, ikm)
+  const cek   = (await hmac(prk, concat(enc.encode('Content-Encoding: aes128gcm\x00'), new Uint8Array([1])))).slice(0, 16)
+  const nonce = (await hmac(prk, concat(enc.encode('Content-Encoding: nonce\x00'),      new Uint8Array([1])))).slice(0, 12)
+
+  const plaintext  = concat(enc.encode(payload), new Uint8Array([2]))
+  const cekKey     = await crypto.subtle.importKey('raw', cek, 'AES-GCM', false, ['encrypt'])
+  const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, cekKey, plaintext))
+
+  // aes128gcm header: salt(16) + rs(4 BE) + idlen(1) + sender_pub(65)
+  const header = new Uint8Array(86)
+  header.set(salt)
+  new DataView(header.buffer).setUint32(16, 4096, false)
+  header[20] = 65
+  header.set(asPub, 21)
+
+  return concat(header, ciphertext)
+}
+
+// ── Fő handler ────────────────────────────────────────────────────────────
+
 Deno.serve(async (req: Request) => {
-  if (req.method !== 'POST') {
-    return new Response('Method not allowed', { status: 405 })
-  }
+  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS })
+  if (req.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: CORS })
 
   let legId: string
   try {
@@ -65,7 +130,7 @@ Deno.serve(async (req: Request) => {
     legId = body.leg_id
     if (!legId) throw new Error('missing leg_id')
   } catch (e) {
-    return new Response(JSON.stringify({ error: String(e) }), { status: 400 })
+    return new Response(JSON.stringify({ error: String(e) }), { status: 400, headers: JSON_CORS })
   }
 
   const supabaseUrl  = Deno.env.get('SUPABASE_URL')!
@@ -75,83 +140,79 @@ Deno.serve(async (req: Request) => {
   const vapidSubject = Deno.env.get('VAPID_SUBJECT') ?? 'mailto:admin@example.com'
 
   if (!vapidPub || !vapidPriv) {
-    return new Response(JSON.stringify({ error: 'VAPID keys not configured' }), { status: 500 })
+    return new Response(JSON.stringify({ error: 'VAPID keys not configured' }), { status: 500, headers: JSON_CORS })
   }
 
   const supabase = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } })
 
-  // Leg + occurrence lekérése
   const { data: leg, error: legErr } = await supabase
     .from('transport_leg')
-    .select('*, occurrence!inner(title, on_date, starts_at, ends_at)')
+    .select('*, occurrence!inner(title, on_date, starts_at)')
     .eq('id', legId)
     .single()
 
   if (legErr || !leg) {
-    return new Response(JSON.stringify({ error: legErr?.message ?? 'leg not found' }), { status: 404 })
+    return new Response(JSON.stringify({ error: legErr?.message ?? 'leg not found' }), { status: 404, headers: JSON_CORS })
   }
-
   if (!leg.driver_id) {
-    return new Response(JSON.stringify({ skipped: 'no driver assigned' }), { status: 200 })
+    return new Response(JSON.stringify({ skipped: 'no driver assigned' }), { status: 200, headers: JSON_CORS })
   }
 
-  // Sofőr auth_user_id-jának lekérése
-  const { data: person, error: personErr } = await supabase
-    .from('person')
-    .select('auth_user_id, display_name')
-    .eq('id', leg.driver_id)
-    .single()
-
-  if (personErr || !person?.auth_user_id) {
-    return new Response(JSON.stringify({ skipped: 'no auth user' }), { status: 200 })
+  const { data: person } = await supabase
+    .from('person').select('auth_user_id').eq('id', leg.driver_id).single()
+  if (!person?.auth_user_id) {
+    return new Response(JSON.stringify({ skipped: 'no auth user' }), { status: 200, headers: JSON_CORS })
   }
 
-  // Push feliratkozások lekérése
   const { data: subs } = await supabase
-    .from('push_subscription')
-    .select('endpoint, p256dh, auth')
-    .eq('user_id', person.auth_user_id)
-
+    .from('push_subscription').select('endpoint, p256dh, auth').eq('user_id', person.auth_user_id)
   if (!subs?.length) {
-    return new Response(JSON.stringify({ skipped: 'no push subscriptions' }), { status: 200 })
+    return new Response(JSON.stringify({ skipped: 'no push subscriptions' }), { status: 200, headers: JSON_CORS })
   }
 
-  // Értesítés szövege
   const occ       = leg.occurrence as { title: string; on_date: string; starts_at: string }
   const direction = leg.direction === 'dropoff' ? 'Elvitel' : 'Hazahozatal'
-  const dateStr   = occ.on_date
   const timeStr   = occ.starts_at?.slice(0, 5) ?? '?'
-
-  const payload = JSON.stringify({
+  const notifPayload = JSON.stringify({
     title: `🚗 Fuvar: ${occ.title}`,
-    body:  `${direction} · ${dateStr} ${timeStr}`,
+    body:  `${direction} · ${occ.on_date} ${timeStr}`,
     url:   '/fuvartabla',
   })
 
-  // Küldés minden feliratkozásra
   const results = await Promise.allSettled(
     subs.map(async (sub) => {
-      const authHeader = await buildVapidAuthHeader(sub.endpoint, vapidPub, vapidPriv, vapidSubject)
-      const res = await fetch(sub.endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type':  'application/octet-stream',
-          'Content-Length': String(new TextEncoder().encode(payload).length),
-          'TTL':            '86400',
-          'Authorization':  authHeader,
-        },
-        body: payload,
-      })
-      if (!res.ok) throw new Error(`push failed: ${res.status}`)
+      let stage = 'vapid'
+      try {
+        const authHeader = await buildVapidHeader(sub.endpoint, vapidPub, vapidPriv, vapidSubject)
+        stage = 'encrypt'
+        const encBody = await encryptWebPush(notifPayload, sub.p256dh, sub.auth)
+        stage = 'fetch'
+        const res = await fetch(sub.endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Encoding': 'aes128gcm',
+            'Content-Type':     'application/octet-stream',
+            'Content-Length':   String(encBody.length),
+            'TTL':              '86400',
+            'Authorization':    authHeader,
+          },
+          body: encBody,
+        })
+        if (!res.ok) {
+          const txt = await res.text().catch(() => '')
+          throw new Error(`HTTP ${res.status}: ${txt}`)
+        }
+      } catch (e) {
+        throw new Error(`[${stage}] ${(e as Error).message}`)
+      }
     })
   )
 
   const sent   = results.filter(r => r.status === 'fulfilled').length
   const failed = results.filter(r => r.status === 'rejected').length
-  console.log(`notify-driver: ${sent} sent, ${failed} failed`)
+  const errors = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+                        .map(r => r.reason?.message ?? String(r.reason))
+  console.log(`notify-driver: ${sent} sent, ${failed} failed`, errors)
 
-  return new Response(JSON.stringify({ sent, failed }), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' },
-  })
+  return new Response(JSON.stringify({ sent, failed, errors }), { status: 200, headers: JSON_CORS })
 })

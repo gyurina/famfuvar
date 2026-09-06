@@ -6,6 +6,7 @@ import { useAuth } from '../lib/auth'
 import { getPref, setPref, PREF_HIDE_CANCELLED } from '../lib/prefs'
 import type { ExternalCalendar, Location, TravelTime, DriverAvailability } from '../types'
 import { isPushSupported, isPushSubscribed, subscribeToPush, unsubscribeFromPush } from '../lib/push'
+import { startGoogleAuth, syncNow, disconnectGoogle, fetchGoogleCalendars } from '../lib/googleCalendar'
 import { format } from 'date-fns'
 
 const WEEKDAYS = ['Hétfő','Kedd','Szerda','Csütörtök','Péntek','Szombat','Vasárnap']
@@ -48,6 +49,9 @@ export function Beallitasok() {
   // Push értesítés állapot
   const [pushEnabled, setPushEnabled] = useState(false)
   const [pushLoading, setPushLoading] = useState(false)
+  const [googleCals, setGoogleCals] = useState<Array<{ id: string; person_id: string; display_name: string; last_synced_at: string | null }>>([])
+  const [syncing, setSyncing]       = useState(false)
+  const [googleMsg, setGoogleMsg]   = useState<string | null>(null)
   const pushSupported = isPushSupported()
 
   useEffect(() => {
@@ -75,6 +79,24 @@ export function Beallitasok() {
   useEffect(() => { setLocations(initLocations) }, [initLocations])
   useEffect(() => { setTravelTimes(initTravelTimes) }, [initTravelTimes])
   useEffect(() => { setAvailabilities(initAvails) }, [initAvails])
+
+  // Google Calendar: URL param kezelés + betöltés
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const googleStatus = params.get('google')
+    if (googleStatus === 'connected') {
+      setGoogleMsg('✓ Google Calendar sikeresen csatlakoztatva!')
+      window.history.replaceState({}, '', window.location.pathname)
+    } else if (googleStatus === 'error') {
+      setGoogleMsg('⚠ Google Calendar csatlakoztatás nem sikerült.')
+      window.history.replaceState({}, '', window.location.pathname)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!householdId) return
+    fetchGoogleCalendars(householdId).then(setGoogleCals)
+  }, [householdId])
 
   useEffect(() => {
     if (!householdId) return
@@ -636,46 +658,144 @@ export function Beallitasok() {
             NAPTÁRAK (read-only)
         ══════════════════════════════════════ */}
         {tab === 'naptarak' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <p style={{ fontSize: 12, color: 'var(--color-muted)', margin: '0 0 4px' }}>
-              A kiírási naptár és a behúzott külső naptárak.
-            </p>
-            {extCals.map(cal => {
-              const owner = persons.find(p => p.id === cal.person_id)
-              return (
-                <div key={cal.id} style={{
-                  borderRadius: 12, padding: '12px 14px',
-                  background: 'var(--color-surface)', border: '1px solid var(--color-border)',
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+            {/* Google Calendar csatlakoztatás */}
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                  <path d="M19.5 22H4.5C3.12 22 2 20.88 2 19.5V7l5-5h12.5C20.88 2 22 3.12 22 4.5v15c0 1.38-1.12 2.5-2.5 2.5z" fill="#4285f4"/>
+                  <path d="M7 2v5H2" fill="#a8c7fa"/>
+                  <rect x="7" y="10" width="10" height="1.5" rx=".75" fill="#fff"/>
+                  <rect x="7" y="13" width="7" height="1.5" rx=".75" fill="#fff"/>
+                </svg>
+                Google Calendar
+              </div>
+              <p style={{ fontSize: 12, color: 'var(--color-muted)', margin: '0 0 10px' }}>
+                Szülők csatlakoztatják saját Google-fiókjukat. A hozzárendelt fuvarok automatikusan megjelennek a Google Calendarban, a Google-eseményeket pedig ütközésvizsgálatra használjuk.
+              </p>
+
+              {googleMsg && (
+                <div style={{
+                  padding: '8px 12px', borderRadius: 8, marginBottom: 10, fontSize: 12,
+                  background: googleMsg.startsWith('✓') ? '#14532d' : '#78350f',
+                  color:      googleMsg.startsWith('✓') ? '#4ade80'  : '#fbbf24',
                 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ width: 10, height: 10, borderRadius: '50%',
-                                      background: cal.color, flexShrink: 0 }} />
-                      <div>
-                        <div style={{ fontSize: 13, fontWeight: 500 }}>{cal.display_name}</div>
-                        <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2 }}>
-                          {owner?.display_name ?? '—'} ·{' '}
-                          {cal.visibility === 'busy_only' ? 'Csak foglalt' : 'Teljes'} ·{' '}
-                          {cal.affects_driving ? 'Ütközésvizsgálat' : 'Csak megjelenítés'}
+                  {googleMsg}
+                </div>
+              )}
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {persons.filter(p => p.role === 'parent').map(parent => {
+                  const gcal = googleCals.find(c => c.person_id === parent.id)
+                  return (
+                    <div key={parent.id} style={{
+                      borderRadius: 12, padding: '12px 14px',
+                      background: 'var(--color-surface)', border: '1px solid var(--color-border)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{
+                          width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+                          background: parent.color, display: 'flex', alignItems: 'center',
+                          justifyContent: 'center', fontSize: 12, fontWeight: 700, color: '#fff',
+                        }}>
+                          {parent.display_name[0]}
+                        </span>
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 500 }}>{parent.display_name}</div>
+                          {gcal ? (
+                            <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 1 }}>
+                              {gcal.display_name}
+                              {gcal.last_synced_at && (
+                                <> · {format(new Date(gcal.last_synced_at), 'MMM d HH:mm')}</>
+                              )}
+                            </div>
+                          ) : (
+                            <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 1 }}>Nincs csatlakoztatva</div>
+                          )}
                         </div>
                       </div>
+                      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                        {gcal ? (
+                          <>
+                            <button
+                              onClick={async () => {
+                                setSyncing(true)
+                                const ok = await syncNow(parent.id)
+                                setSyncing(false)
+                                if (ok) {
+                                  const updated = await fetchGoogleCalendars(householdId!)
+                                  setGoogleCals(updated)
+                                  setGoogleMsg('✓ Szinkronizálva!')
+                                  setTimeout(() => setGoogleMsg(null), 3000)
+                                }
+                              }}
+                              disabled={syncing}
+                              style={{ ...btnGhost, fontSize: 11, padding: '4px 10px' }}
+                            >
+                              {syncing ? '…' : '↻ Szinkron'}
+                            </button>
+                            <button
+                              onClick={async () => {
+                                if (!confirm(`Lecsatlakoztatod ${parent.display_name} Google Calendarját?`)) return
+                                await disconnectGoogle(parent.id)
+                                setGoogleCals(prev => prev.filter(c => c.person_id !== parent.id))
+                                setGoogleMsg('Google Calendar lecsatlakoztatva.')
+                              }}
+                              style={{ ...btnDanger, fontSize: 11, padding: '4px 10px' }}
+                            >
+                              Lecsatlakoztatás
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            onClick={() => householdId && startGoogleAuth(parent.id, householdId)}
+                            style={{ ...btnPrimary, fontSize: 11, padding: '4px 12px', background: '#4285f4' }}
+                          >
+                            Csatlakoztatás
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <span style={{
-                      width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-                      background: cal.is_active ? '#4ade80' : '#475569',
-                    }} />
-                  </div>
-                  {cal.last_synced_at && (
-                    <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 6 }}>
-                      Szinkronizálva: {format(new Date(cal.last_synced_at), 'MMM d, HH:mm')}
-                    </div>
-                  )}
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* Meglévő naptárak (ICS stb.) */}
+            {extCals.filter(c => c.source !== 'google').length > 0 && (
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Egyéb naptárak</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {extCals.filter(c => c.source !== 'google').map(cal => {
+                    const owner = persons.find(p => p.id === cal.person_id)
+                    return (
+                      <div key={cal.id} style={{
+                        borderRadius: 12, padding: '12px 14px',
+                        background: 'var(--color-surface)', border: '1px solid var(--color-border)',
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{ width: 10, height: 10, borderRadius: '50%',
+                                            background: cal.color, flexShrink: 0 }} />
+                            <div>
+                              <div style={{ fontSize: 13, fontWeight: 500 }}>{cal.display_name}</div>
+                              <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2 }}>
+                                {owner?.display_name ?? '—'}
+                              </div>
+                            </div>
+                          </div>
+                          <span style={{
+                            width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+                            background: cal.is_active ? '#4ade80' : '#475569',
+                          }} />
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
-              )
-            })}
-            {extCals.length === 0 && (
-              <p style={{ fontSize: 13, textAlign: 'center', padding: '32px 0',
-                           color: 'var(--color-muted)' }}>Nincs behúzott naptár.</p>
+              </div>
             )}
           </div>
         )}

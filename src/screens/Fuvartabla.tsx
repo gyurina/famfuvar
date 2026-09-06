@@ -9,6 +9,7 @@ import { getPref, PREF_HIDE_CANCELLED } from '../lib/prefs'
 import type { TransportLeg, Occurrence, ScheduleTemplate } from '../types'
 import { OccurrenceOverrideModal } from '../components/OccurrenceOverrideModal'
 import { useOnlineStatus } from '../hooks/useOnlineStatus'
+import { fetchGoogleCalendars, fetchExternalEvents } from '../lib/googleCalendar'
 import { queueAssignDriver } from '../lib/sync'
 import { db } from '../lib/db'
 
@@ -36,6 +37,7 @@ export function Fuvartabla() {
   const [templates, setTemplates] = useState<ScheduleTemplate[]>([])
   const [selectedOcc, setSelectedOcc] = useState<Occurrence | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
+  const [extEvents, setExtEvents] = useState<Array<{ calendar_id: string; starts_at: string; ends_at: string; title: string | null; person_id?: string }>>([])
 
   const hideCancelled = getPref(PREF_HIDE_CANCELLED)
   const today     = new Date()
@@ -74,6 +76,17 @@ export function Fuvartabla() {
       setLegs(legData)
       // Cache legs for offline use
       db.transport_legs.bulkPut(legData).catch(() => {})
+      // Google Calendar ütközésjelzéshez: external events betöltése
+      if (householdId) {
+        fetchGoogleCalendars(householdId).then(async gcals => {
+          if (!gcals.length) return
+          const calMap = new Map(gcals.map(c => [c.id, c.person_id]))
+          const events = await fetchExternalEvents(
+            gcals.map(c => c.id), from, to
+          )
+          setExtEvents(events.map(e => ({ ...e, person_id: calMap.get(e.calendar_id) })))
+        }).catch(() => {})
+      }
       setTemplates((tplRes.data ?? []) as ScheduleTemplate[])
       setLoading(false)
     }).catch(async () => {
@@ -252,6 +265,19 @@ export function Fuvartabla() {
       setTransitAlso(false)
       setAssigning(false)
     }
+  }
+
+  /** True ha a sofőrnek Google Calendar eseménye ütközik a fuvarral */
+  function hasGoogleConflict(driverId: string, leg: LegRow): boolean {
+    const driverCal = extEvents.filter(e => e.person_id === driverId)
+    if (!driverCal.length) return false
+    const legStart = new Date(leg.depart_at).getTime()
+    const legEnd   = leg.arrive_at ? new Date(leg.arrive_at).getTime() : legStart + 30 * 60 * 1000
+    return driverCal.some(e => {
+      const evStart = new Date(e.starts_at).getTime()
+      const evEnd   = new Date(e.ends_at).getTime()
+      return evStart < legEnd && evEnd > legStart
+    })
   }
 
   const myId    = person?.id
@@ -438,14 +464,15 @@ export function Fuvartabla() {
                                 Gazdátlan hagyás
                               </button>
                               {drivers.map(d => {
-                                const conflict = hasConflict(d.id, leg)
+                                const conflict  = hasConflict(d.id, leg)
+                                const gConflict = hasGoogleConflict(d.id, leg)
                                 return (
                                   <button
                                     key={d.id}
                                     className={`picker-btn ${leg.driver_id === d.id ? 'selected' : ''}`}
                                     onClick={() => pickDriver(leg.id, d.id)}
                                     disabled={assigning}
-                                    style={{ border: conflict ? '1px solid rgba(239,68,68,0.35)' : undefined }}
+                                    style={{ border: conflict ? '1px solid rgba(239,68,68,0.35)' : gConflict ? '1px solid rgba(251,191,36,0.4)' : undefined }}
                                   >
                                     <div className="driver-avatar" style={{ background: d.color }}>{d.display_name[0]}</div>
                                     <span style={{ flex: 1 }}>{d.display_name}</span>
@@ -455,6 +482,13 @@ export function Fuvartabla() {
                                         background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)',
                                         borderRadius: 4, padding: '1px 5px', flexShrink: 0,
                                       }}>⚠ ütközés</span>
+                                    )}
+                                    {!conflict && gConflict && (
+                                      <span style={{
+                                        fontSize: 10, fontWeight: 600, color: '#fbbf24',
+                                        background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.25)',
+                                        borderRadius: 4, padding: '1px 5px', flexShrink: 0,
+                                      }}>📅 Google</span>
                                     )}
                                   </button>
                                 )
