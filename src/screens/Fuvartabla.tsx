@@ -9,6 +9,8 @@ import { getPref, PREF_HIDE_CANCELLED } from '../lib/prefs'
 import type { TransportLeg, Occurrence, ScheduleTemplate } from '../types'
 import { OccurrenceOverrideModal } from '../components/OccurrenceOverrideModal'
 import DirectionBadge from '../components/DirectionBadge'
+import { sortLegs } from '../lib/occurrences'
+import { useRole } from '../hooks/useRole'
 import { useOnlineStatus } from '../hooks/useOnlineStatus'
 import { fetchGoogleCalendars, fetchExternalEvents } from '../lib/googleCalendar'
 import { queueAssignDriver } from '../lib/sync'
@@ -26,7 +28,10 @@ type DisplayItem =
 
 export function Fuvartabla() {
   const { person } = useAuth()
+  const { isAdmin, canDriveOnly } = useRole()
   const { drivers, householdId, personById, locationById, locations } = useHousehold()
+  // F4: grandparent csak saját magát látja sofőrként
+  const visibleDrivers = canDriveOnly ? drivers.filter(d => d.id === person?.id) : drivers
   const online = useOnlineStatus()
   const [weekOffset, setWeekOffset] = useState(0)
   const [legs, setLegs] = useState<LegRow[]>([])
@@ -75,7 +80,7 @@ export function Fuvartabla() {
         .where('depart_at').between(from, to, true, true)
         .filter(l => l.household_id === householdId)
         .toArray()
-        .then(cached => { setLegs(cached as any); setLoading(false) })
+        .then(cached => { setLegs(sortLegs(cached as any)); setLoading(false) })
         .catch(() => setLoading(false))
       return
     }
@@ -89,7 +94,7 @@ export function Fuvartabla() {
         .eq('household_id', householdId),
     ]).then(([legRes, tplRes]) => {
       const legData = (legRes.data as any) ?? []
-      setLegs(legData)
+      setLegs(sortLegs(legData))
       db.transport_legs.bulkPut(legData).catch(() => {})
       if (householdId) {
         fetchGoogleCalendars(householdId).then(async gcals => {
@@ -106,7 +111,7 @@ export function Fuvartabla() {
         .where('depart_at').between(from, to, true, true)
         .filter(l => l.household_id === householdId)
         .toArray()
-      setLegs(cached as any)
+      setLegs(sortLegs(cached as any))
       setLoading(false)
     })
   }, [householdId, weekOffset, reloadKey])
@@ -498,11 +503,13 @@ export function Fuvartabla() {
                   if (!occ || seenOccIds.has(occ.id)) return null
                   seenOccIds.add(occ.id)
                   return (
-                    <button
-                      onClick={e => { e.stopPropagation(); setSelectedOcc(occ as Occurrence) }}
-                      style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-muted)', fontSize: 16, padding: '0 4px', lineHeight: 1 }}
-                      title="Módosítás / Lemondás"
-                    >⋯</button>
+                    {isAdmin && (
+                      <button
+                        onClick={e => { e.stopPropagation(); setSelectedOcc(occ as Occurrence) }}
+                        style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-muted)', fontSize: 16, padding: '0 4px', lineHeight: 1 }}
+                        title="Módosítás / Lemondás"
+                      >⋯</button>
+                    )}
                   )
                 })()}
               </div>
@@ -560,7 +567,7 @@ export function Fuvartabla() {
                     <span style={{ color: 'var(--color-red)' }}>⊘</span>
                     Gazdátlan hagyás
                   </button>
-                  {drivers.map(d => {
+                  {visibleDrivers.map(d => {
                     const conflict  = hasConflict(d.id, leg)
                     const gConflict = hasGoogleConflict(d.id, leg)
                     return (
@@ -597,7 +604,7 @@ export function Fuvartabla() {
                   </span>
                 </div>
                 <div className="picker-grid">
-                  {drivers.filter(d => d.id !== pendingDriverId).map(d => {
+                  {visibleDrivers.filter(d => d.id !== pendingDriverId).map(d => {
                     const sel   = selectedCompanions.includes(d.id)
                     const maxed = !sel && selectedCompanions.length >= 2
                     return (
@@ -751,7 +758,7 @@ export function Fuvartabla() {
                     <span style={{ color: 'var(--color-red)' }}>⊘</span>
                     Gazdátlan hagyás
                   </button>
-                  {drivers.map(d => {
+                  {visibleDrivers.map(d => {
                     const conflict  = hasTripConflict(d.id, tripLegs)
                     const gConflict = hasTripGoogleConflict(d.id, tripLegs)
                     return (
@@ -788,7 +795,7 @@ export function Fuvartabla() {
                   </span>
                 </div>
                 <div className="picker-grid">
-                  {drivers.filter(d => d.id !== tripPendingDriverId).map(d => {
+                  {visibleDrivers.filter(d => d.id !== tripPendingDriverId).map(d => {
                     const sel   = tripSelectedCompanions.includes(d.id)
                     const maxed = !sel && tripSelectedCompanions.length >= 2
                     return (
@@ -942,6 +949,7 @@ export function Fuvartabla() {
           occ={selectedOcc}
           template={templates.find(t => t.id === selectedOcc.template_id) ?? null}
           locations={locations}
+          isAdmin={isAdmin}
           onClose={() => setSelectedOcc(null)}
           onDone={() => {
             setSelectedOcc(null)

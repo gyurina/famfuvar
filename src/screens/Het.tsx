@@ -7,12 +7,16 @@ import { useHousehold } from '../hooks/useHousehold'
 import { getPref, PREF_HIDE_CANCELLED } from '../lib/prefs'
 import type { Occurrence, TransportLeg, ScheduleTemplate, LegDirection } from '../types'
 import DirectionBadge from '../components/DirectionBadge'
+import { sortLegs } from '../lib/occurrences'
+import { useRole } from '../hooks/useRole'
+import { sortLegs } from '../lib/occurrences'
 import { OccurrenceOverrideModal } from '../components/OccurrenceOverrideModal'
 import { db } from '../lib/db'
 
 type OccWithLegs = Occurrence & { legs: TransportLeg[] }
 
 export function Het() {
+  const { isAdmin } = useRole()
   const { householdId, personById, locationById, locations } = useHousehold()
   const [weekOffset, setWeekOffset] = useState(0)
   const [items, setItems] = useState<OccWithLegs[]>([])
@@ -211,7 +215,9 @@ export function Het() {
                               <span title="Manuálisan módosított" style={{ fontSize: 11, color: 'var(--color-yellow)' }}>✏️</span>
                             )}
                           </div>
-                          {loc && !loc.is_home && (
+                          {occ.custom_location_text ? (
+                            <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2 }}>📍 {occ.custom_location_text}</div>
+                          ) : loc && !loc.is_home && (
                             <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2 }}>📍 {loc.name}</div>
                           )}
                           {cancelled && (
@@ -222,15 +228,17 @@ export function Het() {
                           )}
                         </div>
                         {/* ••• gomb */}
-                        <button
-                          onClick={() => setSelectedOcc(occ)}
-                          style={{
-                            padding: '10px 12px', background: 'none', border: 'none',
-                            cursor: 'pointer', color: 'var(--color-muted)',
-                            fontSize: 18, lineHeight: 1, alignSelf: 'flex-start',
-                          }}
-                          title="Módosítás / Lemondás"
-                        >⋯</button>
+                        {isAdmin && (
+                          <button
+                            onClick={() => setSelectedOcc(occ)}
+                            style={{
+                              padding: '10px 12px', background: 'none', border: 'none',
+                              cursor: 'pointer', color: 'var(--color-muted)',
+                              fontSize: 18, lineHeight: 1, alignSelf: 'flex-start',
+                            }}
+                            title="Módosítás / Lemondás"
+                          >⋯</button>
+                        )}
                       </div>
 
                       {/* Transport legs */}
@@ -240,10 +248,10 @@ export function Het() {
                           padding: '7px 12px',
                           display: 'flex', flexDirection: 'column', gap: 5,
                         }}>
-                          {[
-                            dropoff ? { leg: dropoff, transfer: dropoffTransfer } : null,
-                            pickup  ? { leg: pickup,  transfer: pickupTransfer  } : null,
-                          ].filter((x): x is NonNullable<typeof x> => x !== null).map(({ leg, transfer }) => {
+                          {sortLegs(occ.legs).map(leg => {
+                            const transfer = transferMap.get(leg.id)
+                            return ({ leg, transfer })
+                          }).map(({ leg, transfer }) => {
                             const driver   = personById(leg!.driver_id)
                             const noDriver = !leg!.driver_id && !leg!.self_transport
                             return (
@@ -296,6 +304,7 @@ export function Het() {
           occ={selectedOcc}
           template={templates.find(t => t.id === selectedOcc.template_id) ?? null}
           locations={locations}
+          isAdmin={isAdmin}
           onClose={() => setSelectedOcc(null)}
           onDone={() => {
             setSelectedOcc(null)

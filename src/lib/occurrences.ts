@@ -51,7 +51,7 @@ export interface OccurrenceOverridePatch {
   starts_at?:  string   // 'HH:mm'
   ends_at?:    string
   location_id?: string
-  note?:       string
+  note?:       string  custom_location_text?: string | null
 }
 
 export async function updateOccurrence(
@@ -294,6 +294,7 @@ export async function resetOccurrenceToTemplate(
       ends_at:     template.ends_at,
       location_id: template.location_id,
       note:        null,
+    custom_location_text: null,
       is_override: false,
       updated_by:  personId,
       updated_at:  new Date().toISOString(),
@@ -330,5 +331,19 @@ export async function forceRegenerateLegs(occurrenceId: string): Promise<void> {
     starts_at:   occ.starts_at,
     ends_at:     occ.ends_at,
     location_id: occ.location_id,
+  })
+}
+
+// ── F2: Leg-sorrend formalizálása ────────────────────────────────────────────
+// Szabály: pickup (← elhozás) mindig megelőzi a dropoff-ot (→ odavisz)
+// azonos depart_at esetén. Különböző időpontok esetén a korábbi jön először.
+export function sortLegs<T extends { direction: string; depart_at: string }>(legs: T[]): T[] {
+  return [...legs].sort((a, b) => {
+    const timeDiff = a.depart_at.localeCompare(b.depart_at)
+    if (timeDiff !== 0) return timeDiff
+    // Azonos időpont: pickup (←) előbb, dropoff (→) később
+    if (a.direction === 'pickup' && b.direction === 'dropoff') return -1
+    if (a.direction === 'dropoff' && b.direction === 'pickup') return 1
+    return 0
   })
 }
