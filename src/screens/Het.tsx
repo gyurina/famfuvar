@@ -60,7 +60,6 @@ export function Het() {
   })
 
   const totalItems = items.length
-  const orphanLegs = items.flatMap(o => o.legs).filter(l => !l.driver_id && l.occurrence?.status !== 'cancelled')
 
   return (
     <div style={{ background: 'var(--color-bg)', minHeight: '100dvh' }}>
