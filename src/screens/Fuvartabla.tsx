@@ -154,10 +154,11 @@ export function Fuvartabla() {
     comp1: string | null,
     comp2: string | null,
     silent = false,
+    selfTransport = false,
   ) {
     if (!silent) setAssigning(true)
     const { data } = await supabase.from('transport_leg')
-      .update({ driver_id: driverId, companion_id: comp1, companion2_id: comp2 })
+      .update({ driver_id: driverId, companion_id: comp1, companion2_id: comp2, self_transport: selfTransport })
       .eq('id', legId).select('*, occurrence!inner(*)').single()
     if (data) setLegs(prev => prev.map(l => l.id === legId ? data as any : l))
     if (!silent) {
@@ -173,7 +174,7 @@ export function Fuvartabla() {
 
   const myId    = person?.id
   const visLegs = hideCancelled ? legs.filter(l => l.occurrence?.status !== 'cancelled') : legs
-  const orphans     = visLegs.filter(l => !l.driver_id && l.occurrence?.status !== 'cancelled')
+  const orphans     = visLegs.filter(l => !l.driver_id && !l.self_transport && l.occurrence?.status !== 'cancelled')
   const allAssigned = visLegs.length > 0 && orphans.length === 0
   const bannerClass = allAssigned ? 'ok' : orphans.length ? 'warn' : 'neutral'
 
@@ -255,7 +256,7 @@ export function Fuvartabla() {
                 const occ      = leg.occurrence
                 const driver   = personById(leg.driver_id)
                 const child    = personById(occ?.person_id)
-                const isOrphan = !leg.driver_id && occ?.status !== 'cancelled'
+                const isOrphan = !leg.driver_id && !leg.self_transport && occ?.status !== 'cancelled'
                 const isOpen   = openLegId === leg.id
                 const fromLoc  = locationById(leg.from_location)
                 const toLoc    = locationById(leg.to_location)
@@ -312,13 +313,13 @@ export function Fuvartabla() {
                         </div>
 
                         <button
-                          className={`driver-badge ${isOrphan ? 'orphan' : 'assigned'}`}
+                          className={`driver-badge ${isOrphan ? 'orphan' : leg.self_transport ? 'self' : 'assigned'}`}
                           onClick={() => openLeg(leg.id)}
                           disabled={occ?.status === 'cancelled'}
                           style={{ opacity: occ?.status === 'cancelled' ? 0.6 : 1 }}
                         >
-                          {driver && <div className="driver-avatar" style={{ background: driver.color }}>{driver.display_name[0]}</div>}
-                          <span>{isOrphan ? '? Nincs' : crewLabel(leg)}</span>
+                          {!leg.self_transport && driver && <div className="driver-avatar" style={{ background: driver.color }}>{driver.display_name[0]}</div>}
+                          <span>{leg.self_transport ? '🚶 Önállóan' : isOrphan ? '? Nincs' : crewLabel(leg)}</span>
                         </button>
                       </div>
                     </div>
@@ -346,6 +347,10 @@ export function Fuvartabla() {
                             })()}
 
                             <div className="picker-grid">
+                              <button className="picker-btn self-btn" onClick={() => doAssign(leg.id, null, null, null, false, true)} disabled={assigning}>
+                                <span style={{ fontSize: 18 }}>🚶</span>
+                                <span style={{ fontSize: 11 }}>Önállóan</span>
+                              </button>
                               <button className="picker-btn none-btn" onClick={() => pickDriver(leg.id, null)}>
                                 <span style={{ color: 'var(--color-red)' }}>⊘</span>
                                 Gazdátlan hagyás

@@ -104,6 +104,7 @@ export interface TransportLeg {
   from_location: string | null
   to_location: string | null
   note: string | null
+  self_transport: boolean
 }
 
 export interface ExternalCalendar {

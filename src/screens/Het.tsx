@@ -226,7 +226,7 @@ export function Het() {
                             pickup  ? { leg: pickup,  transfer: pickupTransfer  } : null,
                           ].filter((x): x is NonNullable<typeof x> => x !== null).map(({ leg, transfer }) => {
                             const driver   = personById(leg!.driver_id)
-                            const noDriver = !leg!.driver_id
+                            const noDriver = !leg!.driver_id && !leg!.self_transport
                             return (
                               <div key={leg!.id} style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                                 <span style={{ color: 'var(--color-muted)', fontSize: 11 }}>
