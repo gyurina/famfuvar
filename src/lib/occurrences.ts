@@ -80,7 +80,7 @@ export async function updateOccurrence(
 
   if (error) throw error
 
-  // Transport leg-ek újragenerálása, ha időpont változott
+  // Transport leg-ek újragenerálása, ha időpont vagy helyszín változott
   if (patch.starts_at || patch.ends_at || patch.location_id) {
     await regenerateLegs(occ, patch)
   }
@@ -103,6 +103,29 @@ async function regenerateLegs(
     .from('transport_leg')
     .select('*')
     .eq('occurrence_id', occurrenceId)
+
+  const prevDropoff = existingLegs?.find(l => l.direction === 'dropoff')
+  const prevPickup  = existingLegs?.find(l => l.direction === 'pickup')
+
+  // FIX: ha nincs meglévő leg, a template-ből döntjük el kell-e dropoff/pickup.
+  // Ha template sincs, alapértelmezés: mindkét irány.
+  let needsDropoff = prevDropoff !== undefined
+  let needsPickup  = prevPickup  !== undefined
+
+  if (!needsDropoff && !needsPickup) {
+    if (occ.template_id) {
+      const { data: tpl } = await supabase
+        .from('schedule_template')
+        .select('needs_dropoff, needs_pickup')
+        .eq('id', occ.template_id as string)
+        .single()
+      needsDropoff = tpl?.needs_dropoff ?? true
+      needsPickup  = tpl?.needs_pickup  ?? true
+    } else {
+      needsDropoff = true
+      needsPickup  = true
+    }
+  }
 
   // Otthoni helyszín azonosítása
   const { data: homeLoc } = await supabase
@@ -130,10 +153,22 @@ async function regenerateLegs(
     return times?.find(t => t.from_location === from && t.to_location === to)?.minutes ?? 15
   }
 
-  // Időpont segédfüggvény: 'YYYY-MM-DD' + 'HH:mm[:ss]' → Date (Budapest helyi)
+  // FIX: Budapest timezone dinamikusan (CET=+01:00 télen, CEST=+02:00 nyáron)
   function localDt(dateStr: string, timeStr: string): Date {
     const t = timeStr.slice(0, 5)  // 'HH:mm'
-    return new Date(`${dateStr}T${t}:00+02:00`)
+    // Probe: déli UTC időből Budapest helyi óra → offset kiszámítása
+    const probe = new Date(`${dateStr}T12:00:00Z`)
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Europe/Budapest',
+      hour: 'numeric',
+      hour12: false,
+    }).formatToParts(probe)
+    const localHour = parseInt(parts.find(p => p.type === 'hour')?.value ?? '14')
+    const offsetMin = (localHour - 12) * 60  // pl. 14 → +120, 13 → +60
+    const sign = offsetMin >= 0 ? '+' : '-'
+    const hh = String(Math.floor(Math.abs(offsetMin) / 60)).padStart(2, '0')
+    const mm = String(Math.abs(offsetMin) % 60).padStart(2, '0')
+    return new Date(`${dateStr}T${t}:00${sign}${hh}:${mm}`)
   }
 
   const arrivalDropoff  = localDt(onDate, startsAt)
@@ -143,35 +178,35 @@ async function regenerateLegs(
   const departDropoff   = new Date(arrivalDropoff.getTime() - travelToMin * 60_000)
   const arrivalPickup   = new Date(departPickup.getTime() + travelBackMin * 60_000)
 
-  // Meglévő adatok megőrzése (sofőr, utas csoport)
-  const prevDropoff = existingLegs?.find(l => l.direction === 'dropoff')
-  const prevPickup  = existingLegs?.find(l => l.direction === 'pickup')
-
   // Töröljük a régieket
   await supabase.from('transport_leg').delete().eq('occurrence_id', occurrenceId)
 
-  // Újra létrehozzuk frissített időkkel, megőrzött sofőrrel
+  // FIX: companion_id + companion2_id is átmásolódik az új leg-be
   const newLegs = []
-  if (prevDropoff !== undefined) {
+  if (needsDropoff) {
     newLegs.push({
       household_id:  householdId,
       occurrence_id: occurrenceId,
       direction:     'dropoff',
-      driver_id:     prevDropoff?.driver_id ?? null,
-      group_id:      prevDropoff?.group_id  ?? null,
+      driver_id:     prevDropoff?.driver_id     ?? null,
+      companion_id:  prevDropoff?.companion_id  ?? null,
+      companion2_id: prevDropoff?.companion2_id ?? null,
+      group_id:      prevDropoff?.group_id      ?? null,
       depart_at:     departDropoff.toISOString(),
       arrive_at:     arrivalDropoff.toISOString(),
       from_location: homeLoc.id,
       to_location:   locationId,
     })
   }
-  if (prevPickup !== undefined) {
+  if (needsPickup) {
     newLegs.push({
       household_id:  householdId,
       occurrence_id: occurrenceId,
       direction:     'pickup',
-      driver_id:     prevPickup?.driver_id ?? null,
-      group_id:      prevPickup?.group_id  ?? null,
+      driver_id:     prevPickup?.driver_id     ?? null,
+      companion_id:  prevPickup?.companion_id  ?? null,
+      companion2_id: prevPickup?.companion2_id ?? null,
+      group_id:      prevPickup?.group_id      ?? null,
       depart_at:     departPickup.toISOString(),
       arrive_at:     arrivalPickup.toISOString(),
       from_location: locationId,
