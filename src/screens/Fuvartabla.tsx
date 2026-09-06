@@ -57,6 +57,30 @@ export function Fuvartabla() {
     })
   }, [householdId, weekOffset, reloadKey])
 
+  // Realtime: sofőr-hozzárendelés élő frissítés (UPDATE events)
+  useEffect(() => {
+    if (!householdId) return
+    const channel = supabase
+      .channel(`fuvartabla-rt-${householdId}`)
+      .on(
+        'postgres_changes' as any,
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'transport_leg',
+          filter: `household_id=eq.${householdId}`,
+        },
+        (payload: any) => {
+          const updated = payload.new as Record<string, unknown>
+          setLegs(prev =>
+            prev.map(l => l.id === updated.id ? { ...l, ...updated } : l)
+          )
+        }
+      )
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [householdId])
+
   function openLeg(legId: string) {
     if (openLegId === legId) {
       setOpenLegId(null)
