@@ -161,6 +161,11 @@ export function Fuvartabla() {
       .update({ driver_id: driverId, companion_id: comp1, companion2_id: comp2, self_transport: selfTransport })
       .eq('id', legId).select('*, occurrence!inner(*)').single()
     if (data) setLegs(prev => prev.map(l => l.id === legId ? data as any : l))
+    // Push értesítés a sofőrnek (fire-and-forget)
+    if (driverId && !selfTransport) {
+      supabase.functions.invoke('notify-driver', { body: { leg_id: legId } })
+        .catch(e => console.warn('notify-driver:', e))
+    }
     if (!silent) {
       setOpenLegId(null)
       setPickerStep('driver')

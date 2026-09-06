@@ -5,6 +5,7 @@ import { useHousehold } from '../hooks/useHousehold'
 import { useAuth } from '../lib/auth'
 import { getPref, setPref, PREF_HIDE_CANCELLED } from '../lib/prefs'
 import type { ExternalCalendar, Location, TravelTime, DriverAvailability } from '../types'
+import { isPushSupported, isPushSubscribed, subscribeToPush, unsubscribeFromPush } from '../lib/push'
 import { format } from 'date-fns'
 
 const WEEKDAYS = ['Hétfő','Kedd','Szerda','Csütörtök','Péntek','Szombat','Vasárnap']
@@ -43,6 +44,28 @@ export function Beallitasok() {
   const [tab, setTab] = useState<Tab>('helyszin')
   const [extCals, setExtCals] = useState<ExternalCalendar[]>([])
   const [hideCancelled, setHideCancelled] = useState(() => getPref(PREF_HIDE_CANCELLED))
+
+  // Push értesítés állapot
+  const [pushEnabled, setPushEnabled] = useState(false)
+  const [pushLoading, setPushLoading] = useState(false)
+  const pushSupported = isPushSupported()
+
+  useEffect(() => {
+    isPushSubscribed().then(setPushEnabled)
+  }, [])
+
+  async function togglePush() {
+    setPushLoading(true)
+    if (pushEnabled) {
+      await unsubscribeFromPush()
+      setPushEnabled(false)
+    } else {
+      if (!householdId) return
+      const ok = await subscribeToPush(householdId)
+      setPushEnabled(ok)
+    }
+    setPushLoading(false)
+  }
 
   // Local editable copies
   const [locations, setLocations] = useState<Location[]>([])
@@ -250,6 +273,40 @@ export function Beallitasok() {
             }} />
           </button>
         </div>
+
+        {pushSupported && (
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '10px 14px', borderRadius: 'var(--r-md)', marginTop: 8,
+            background: 'var(--color-surface)', border: '1px solid var(--color-border)',
+          }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 500 }}>Push értesítések</div>
+              <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2 }}>
+                Értesítés sofőr-hozzárendeléskor
+              </div>
+            </div>
+            <button
+              onClick={togglePush}
+              disabled={pushLoading}
+              style={{
+                width: 44, height: 26, borderRadius: 13, flexShrink: 0,
+                background: pushEnabled ? 'var(--color-blue)' : 'var(--color-surface-2)',
+                border: `1px solid ${pushEnabled ? 'var(--color-blue)' : 'var(--color-border)'}`,
+                cursor: pushLoading ? 'wait' : 'pointer', position: 'relative', transition: 'all 0.2s',
+                opacity: pushLoading ? 0.6 : 1,
+              }}
+            >
+              <span style={{
+                position: 'absolute', top: 3,
+                left: pushEnabled ? 20 : 3,
+                width: 18, height: 18, borderRadius: '50%',
+                background: '#fff', transition: 'left 0.2s',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+              }} />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Belső tab sor */}
