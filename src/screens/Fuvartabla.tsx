@@ -907,7 +907,7 @@ export function Fuvartabla() {
       {/* Merge action bar */}
       {mergeMode && (
         <div style={{
-          position: 'fixed', bottom: 0, left: 0, right: 0,
+          position: 'fixed', bottom: 'calc(56px + env(safe-area-inset-bottom, 0))', left: 0, right: 0,
           padding: '12px 16px', paddingBottom: 'calc(12px + env(safe-area-inset-bottom))',
           background: 'var(--color-surface)', borderTop: '1px solid var(--color-border)',
           display: 'flex', gap: 8,
