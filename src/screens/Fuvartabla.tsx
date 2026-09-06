@@ -5,6 +5,7 @@ import { Header } from '../components/Header'
 import { supabase } from '../lib/supabase'
 import { useHousehold } from '../hooks/useHousehold'
 import { useAuth } from '../lib/auth'
+import { getPref, PREF_HIDE_CANCELLED } from '../lib/prefs'
 import type { TransportLeg, Occurrence } from '../types'
 
 type LegRow = TransportLeg & {
@@ -25,8 +26,10 @@ export function Fuvartabla() {
   const [pendingDriverId, setPendingDriverId] = useState<string | null>(null)
   const [selectedCompanions, setSelectedCompanions] = useState<string[]>([])
   const [returnAlso, setReturnAlso] = useState(false)
+  const [transitAlso, setTransitAlso] = useState(false)
   const [assigning, setAssigning] = useState(false)
 
+  const hideCancelled = getPref(PREF_HIDE_CANCELLED)
   const today     = new Date()
   const weekStart = addDays(startOfWeek(today, { weekStartsOn: 1 }), weekOffset * 7)
   const days      = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
@@ -52,6 +55,7 @@ export function Fuvartabla() {
       setPendingDriverId(null)
       setSelectedCompanions([])
       setReturnAlso(false)
+      setTransitAlso(false)
     }
   }
 
@@ -66,6 +70,7 @@ export function Fuvartabla() {
       setPendingDriverId(driverId)
       setSelectedCompanions(pre)
       setReturnAlso(false)
+      setTransitAlso(false)
       setPickerStep('companion')
     }
   }
@@ -78,16 +83,34 @@ export function Fuvartabla() {
     })
   }
 
+  /** Same occurrence, opposite direction */
   function pairedLeg(legId: string): LegRow | undefined {
     const leg = legs.find(l => l.id === legId)
     if (!leg) return undefined
-    return legs.find(l =>
-      l.occurrence_id === leg.occurrence_id &&
-      l.direction !== leg.direction
-    )
+    return legs.find(l => l.occurrence_id === leg.occurrence_id && l.direction !== leg.direction)
   }
 
-  /** True if driverId is already assigned to another leg that overlaps with currentLeg's time window */
+  /** Different occurrence, same person_id, opposite direction, depart/arrive within 30 min */
+  function transitLeg(legId: string): LegRow | undefined {
+    const leg = legs.find(l => l.id === legId)
+    if (!leg) return undefined
+    const personId = leg.occurrence?.person_id
+    if (!personId) return undefined
+    const legTime = leg.direction === 'pickup'
+      ? new Date(leg.arrive_at).getTime()
+      : new Date(leg.depart_at).getTime()
+    return legs.find(other => {
+      if (other.occurrence_id === leg.occurrence_id) return false
+      if (other.occurrence?.person_id !== personId) return false
+      if (other.direction === leg.direction) return false
+      const otherTime = other.direction === 'dropoff'
+        ? new Date(other.depart_at).getTime()
+        : new Date(other.arrive_at || other.depart_at).getTime()
+      return Math.abs(otherTime - legTime) < 30 * 60 * 1000
+    })
+  }
+
+  /** True if driverId is already assigned to another overlapping leg */
   function hasConflict(driverId: string, currentLeg: LegRow): boolean {
     if (!currentLeg.arrive_at) return false
     return legs.some(l =>
@@ -106,9 +129,11 @@ export function Fuvartabla() {
 
     if (returnAlso) {
       const paired = pairedLeg(legId)
-      if (paired) {
-        await doAssign(paired.id, pendingDriverId, comp1, comp2, true)
-      }
+      if (paired) await doAssign(paired.id, pendingDriverId, comp1, comp2, true)
+    }
+    if (transitAlso) {
+      const transit = transitLeg(legId)
+      if (transit) await doAssign(transit.id, pendingDriverId, comp1, comp2, true)
     }
   }
 
@@ -130,38 +155,33 @@ export function Fuvartabla() {
       setPendingDriverId(null)
       setSelectedCompanions([])
       setReturnAlso(false)
+      setTransitAlso(false)
       setAssigning(false)
     }
   }
 
-  const myId        = person?.id
-  const orphans     = legs.filter(l => !l.driver_id && l.occurrence?.status !== 'cancelled')
-  const allAssigned = legs.length > 0 && orphans.length === 0
+  const myId    = person?.id
+  const visLegs = hideCancelled ? legs.filter(l => l.occurrence?.status !== 'cancelled') : legs
+  const orphans     = visLegs.filter(l => !l.driver_id && l.occurrence?.status !== 'cancelled')
+  const allAssigned = visLegs.length > 0 && orphans.length === 0
   const bannerClass = allAssigned ? 'ok' : orphans.length ? 'warn' : 'neutral'
 
   const grouped = days.map(d => {
-    let dayLegs = legs.filter(l => l.depart_at.startsWith(format(d, 'yyyy-MM-dd')))
+    let dayLegs = visLegs.filter(l => l.depart_at.startsWith(format(d, 'yyyy-MM-dd')))
     if (filter === 'mine' && myId) {
       dayLegs = dayLegs.filter(l =>
-        l.driver_id === myId ||
-        l.companion_id === myId ||
-        l.companion2_id === myId
+        l.driver_id === myId || l.companion_id === myId || l.companion2_id === myId
       )
     }
-    return {
-      date: d,
-      label: format(d, 'EEEE, MMM d.', { locale: hu }),
-      legs: dayLegs,
-    }
+    return { date: d, label: format(d, 'EEEE, MMM d.', { locale: hu }), legs: dayLegs }
   })
 
   function crewLabel(leg: LegRow) {
-    const parts = [
+    return [
       personById(leg.driver_id)?.display_name,
       personById(leg.companion_id)?.display_name,
       personById(leg.companion2_id)?.display_name,
-    ].filter(Boolean)
-    return parts.join(' + ')
+    ].filter(Boolean).join(' + ')
   }
 
   return (
@@ -191,17 +211,13 @@ export function Fuvartabla() {
       {/* Filter chips */}
       <div style={{ display: 'flex', gap: 8, padding: '10px 16px 0' }}>
         {(['all', 'mine'] as const).map(f => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            style={{
-              padding: '5px 14px', borderRadius: 100, fontSize: 12, fontWeight: 600,
-              border: `1px solid ${filter === f ? 'var(--color-blue)' : 'var(--color-border)'}`,
-              background: filter === f ? 'rgba(79,156,249,0.12)' : 'var(--color-surface)',
-              color: filter === f ? 'var(--color-blue)' : 'var(--color-muted)',
-              cursor: 'pointer', transition: 'all 0.15s',
-            }}
-          >
+          <button key={f} onClick={() => setFilter(f)} style={{
+            padding: '5px 14px', borderRadius: 100, fontSize: 12, fontWeight: 600,
+            border: `1px solid ${filter === f ? 'var(--color-blue)' : 'var(--color-border)'}`,
+            background: filter === f ? 'rgba(79,156,249,0.12)' : 'var(--color-surface)',
+            color: filter === f ? 'var(--color-blue)' : 'var(--color-muted)',
+            cursor: 'pointer', transition: 'all 0.15s',
+          }}>
             {f === 'all' ? 'Összes' : 'Csak én'}
           </button>
         ))}
@@ -231,7 +247,8 @@ export function Fuvartabla() {
                 const fromLoc  = locationById(leg.from_location)
                 const toLoc    = locationById(leg.to_location)
                 const stripe   = child?.color ?? 'var(--color-border)'
-                const hasPaired = !!pairedLeg(leg.id)
+                const hasPaired  = !!pairedLeg(leg.id)
+                const hasTransit = !!transitLeg(leg.id)
 
                 return (
                   <div key={leg.id} style={{ marginBottom: 8 }}>
@@ -253,15 +270,16 @@ export function Fuvartabla() {
                             <span style={{ fontSize: 13 }}>
                               {leg.direction === 'dropoff' ? '→' : '←'} {occ?.title ?? '?'}
                             </span>
-                            {child && (
-                              <span style={{ fontSize: 11, color: child.color, fontWeight: 600 }}>
-                                ({child.display_name})
-                              </span>
-                            )}
+                            {child && <span style={{ fontSize: 11, color: child.color, fontWeight: 600 }}>({child.display_name})</span>}
                           </div>
                           {(fromLoc || toLoc) && (
                             <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2 }}>
                               {fromLoc?.name}{fromLoc && toLoc ? ' → ' : ''}{toLoc?.name}
+                            </div>
+                          )}
+                          {hasTransit && (
+                            <div style={{ fontSize: 10, color: 'var(--color-yellow)', marginTop: 2 }}>
+                              ⚡ Átszállítás: {(() => { const t = transitLeg(leg.id); return t ? `${format(new Date(t.depart_at),'HH:mm')} ${t.direction==='dropoff'?'→':'←'} ${t.occurrence?.title}` : '' })()}
                             </div>
                           )}
                         </div>
@@ -272,11 +290,7 @@ export function Fuvartabla() {
                           disabled={occ?.status === 'cancelled'}
                           style={{ opacity: occ?.status === 'cancelled' ? 0.6 : 1 }}
                         >
-                          {driver && (
-                            <div className="driver-avatar" style={{ background: driver.color }}>
-                              {driver.display_name[0]}
-                            </div>
-                          )}
+                          {driver && <div className="driver-avatar" style={{ background: driver.color }}>{driver.display_name[0]}</div>}
                           <span>{isOrphan ? '? Nincs' : crewLabel(leg)}</span>
                         </button>
                       </div>
@@ -284,22 +298,28 @@ export function Fuvartabla() {
 
                     {/* Picker */}
                     {isOpen && (
-                      <div
-                        className="picker-panel"
-                        style={{
-                          borderRadius: '0 0 var(--r-md) var(--r-md)',
-                          border: '1px solid var(--color-border)',
-                          borderTop: 'none',
-                        }}
-                      >
+                      <div className="picker-panel" style={{ borderRadius: '0 0 var(--r-md) var(--r-md)', border: '1px solid var(--color-border)', borderTop: 'none' }}>
                         {pickerStep === 'driver' ? (
                           <>
                             <div className="picker-label">Ki vezet?</div>
+
+                            {/* Transit banner */}
+                            {hasTransit && (() => {
+                              const t = transitLeg(leg.id)!
+                              return (
+                                <div style={{
+                                  marginBottom: 10, padding: '7px 10px', borderRadius: 'var(--r-sm)',
+                                  background: 'rgba(245,200,66,0.08)', border: '1px solid rgba(245,200,66,0.25)',
+                                  fontSize: 11, color: 'var(--color-yellow)',
+                                }}>
+                                  ⚡ <strong>Átszállítás</strong> — {format(new Date(t.depart_at),'HH:mm')} {t.direction==='dropoff'?'→':'←'} {t.occurrence?.title}.
+                                  Ha ugyanaz a sofőr viszi, közvetlenül mehet tovább.
+                                </div>
+                              )
+                            })()}
+
                             <div className="picker-grid">
-                              <button
-                                className="picker-btn none-btn"
-                                onClick={() => pickDriver(leg.id, null)}
-                              >
+                              <button className="picker-btn none-btn" onClick={() => pickDriver(leg.id, null)}>
                                 <span style={{ color: 'var(--color-red)' }}>⊘</span>
                                 Gazdátlan hagyás
                               </button>
@@ -311,28 +331,16 @@ export function Fuvartabla() {
                                     className={`picker-btn ${leg.driver_id === d.id ? 'selected' : ''}`}
                                     onClick={() => pickDriver(leg.id, d.id)}
                                     disabled={assigning}
-                                    style={{
-                                      border: conflict
-                                        ? '1px solid rgba(239,68,68,0.35)'
-                                        : undefined,
-                                    }}
+                                    style={{ border: conflict ? '1px solid rgba(239,68,68,0.35)' : undefined }}
                                   >
-                                    <div className="driver-avatar" style={{ background: d.color }}>
-                                      {d.display_name[0]}
-                                    </div>
+                                    <div className="driver-avatar" style={{ background: d.color }}>{d.display_name[0]}</div>
                                     <span style={{ flex: 1 }}>{d.display_name}</span>
                                     {conflict && (
                                       <span style={{
-                                        fontSize: 10, fontWeight: 600,
-                                        color: 'var(--color-red)',
-                                        background: 'rgba(239,68,68,0.1)',
-                                        border: '1px solid rgba(239,68,68,0.25)',
-                                        borderRadius: 4,
-                                        padding: '1px 5px',
-                                        flexShrink: 0,
-                                      }}>
-                                        ⚠ ütközés
-                                      </span>
+                                        fontSize: 10, fontWeight: 600, color: 'var(--color-red)',
+                                        background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)',
+                                        borderRadius: 4, padding: '1px 5px', flexShrink: 0,
+                                      }}>⚠ ütközés</span>
                                     )}
                                   </button>
                                 )
@@ -343,7 +351,7 @@ export function Fuvartabla() {
                           <>
                             <div className="picker-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                               <button
-                                onClick={() => { setPickerStep('driver'); setPendingDriverId(null); setSelectedCompanions([]); setReturnAlso(false) }}
+                                onClick={() => { setPickerStep('driver'); setPendingDriverId(null); setSelectedCompanions([]); setReturnAlso(false); setTransitAlso(false) }}
                                 style={{ background: 'none', border: 'none', color: 'var(--color-muted)', cursor: 'pointer', fontSize: 18, padding: 0, lineHeight: 1 }}
                               >←</button>
                               Ki megy még?
@@ -353,42 +361,31 @@ export function Fuvartabla() {
                             </div>
 
                             <div className="picker-grid">
-                              {drivers
-                                .filter(d => d.id !== pendingDriverId)
-                                .map(d => {
-                                  const sel    = selectedCompanions.includes(d.id)
-                                  const maxed  = !sel && selectedCompanions.length >= 2
-                                  return (
-                                    <button
-                                      key={d.id}
-                                      className={`picker-btn ${sel ? 'selected' : ''}`}
-                                      onClick={() => toggleCompanion(d.id)}
-                                      disabled={assigning || maxed}
-                                      style={{ opacity: maxed ? 0.4 : 1 }}
-                                    >
-                                      <div className="driver-avatar" style={{ background: d.color }}>
-                                        {d.display_name[0]}
-                                      </div>
-                                      {d.display_name}
-                                      {sel && <span style={{ marginLeft: 'auto', color: 'var(--color-blue)', fontSize: 14 }}>✓</span>}
-                                    </button>
-                                  )
-                                })}
+                              {drivers.filter(d => d.id !== pendingDriverId).map(d => {
+                                const sel   = selectedCompanions.includes(d.id)
+                                const maxed = !sel && selectedCompanions.length >= 2
+                                return (
+                                  <button key={d.id} className={`picker-btn ${sel ? 'selected' : ''}`}
+                                    onClick={() => toggleCompanion(d.id)} disabled={assigning || maxed}
+                                    style={{ opacity: maxed ? 0.4 : 1 }}>
+                                    <div className="driver-avatar" style={{ background: d.color }}>{d.display_name[0]}</div>
+                                    {d.display_name}
+                                    {sel && <span style={{ marginLeft: 'auto', color: 'var(--color-blue)', fontSize: 14 }}>✓</span>}
+                                  </button>
+                                )
+                              })}
                             </div>
 
+                            {/* Visszahozza is? */}
                             {hasPaired && (
-                              <button
-                                onClick={() => setReturnAlso(r => !r)}
-                                style={{
-                                  display: 'flex', alignItems: 'center', gap: 10,
-                                  width: '100%', marginTop: 10,
-                                  padding: '9px 12px', borderRadius: 'var(--r-sm)',
-                                  background: returnAlso ? 'rgba(45,216,138,0.08)' : 'var(--color-surface-2)',
-                                  border: `1px solid ${returnAlso ? 'rgba(45,216,138,0.3)' : 'var(--color-border)'}`,
-                                  color: returnAlso ? 'var(--color-green)' : 'var(--color-muted)',
-                                  cursor: 'pointer', fontSize: 12, fontWeight: 600, transition: 'all 0.15s',
-                                }}
-                              >
+                              <button onClick={() => setReturnAlso(r => !r)} style={{
+                                display: 'flex', alignItems: 'center', gap: 10, width: '100%', marginTop: 10,
+                                padding: '9px 12px', borderRadius: 'var(--r-sm)',
+                                background: returnAlso ? 'rgba(45,216,138,0.08)' : 'var(--color-surface-2)',
+                                border: `1px solid ${returnAlso ? 'rgba(45,216,138,0.3)' : 'var(--color-border)'}`,
+                                color: returnAlso ? 'var(--color-green)' : 'var(--color-muted)',
+                                cursor: 'pointer', fontSize: 12, fontWeight: 600, transition: 'all 0.15s',
+                              }}>
                                 <span style={{
                                   width: 18, height: 18, borderRadius: 4, flexShrink: 0,
                                   background: returnAlso ? 'var(--color-green)' : 'var(--color-border)',
@@ -399,19 +396,38 @@ export function Fuvartabla() {
                               </button>
                             )}
 
+                            {/* Átszállítást is ez a csapat vigye */}
+                            {hasTransit && (() => {
+                              const t = transitLeg(leg.id)!
+                              return (
+                                <button onClick={() => setTransitAlso(v => !v)} style={{
+                                  display: 'flex', alignItems: 'center', gap: 10, width: '100%', marginTop: 8,
+                                  padding: '9px 12px', borderRadius: 'var(--r-sm)',
+                                  background: transitAlso ? 'rgba(245,200,66,0.08)' : 'var(--color-surface-2)',
+                                  border: `1px solid ${transitAlso ? 'rgba(245,200,66,0.3)' : 'var(--color-border)'}`,
+                                  color: transitAlso ? 'var(--color-yellow)' : 'var(--color-muted)',
+                                  cursor: 'pointer', fontSize: 12, fontWeight: 600, transition: 'all 0.15s',
+                                }}>
+                                  <span style={{
+                                    width: 18, height: 18, borderRadius: 4, flexShrink: 0,
+                                    background: transitAlso ? 'var(--color-yellow)' : 'var(--color-border)',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    fontSize: 11, color: transitAlso ? '#000' : 'transparent', transition: 'all 0.15s',
+                                  }}>✓</span>
+                                  ⚡ Az átszállítást is ő vigye
+                                  <span style={{ fontSize: 10, color: 'var(--color-muted)', fontWeight: 400, marginLeft: 2 }}>
+                                    ({format(new Date(t.depart_at),'HH:mm')} {t.direction==='dropoff'?'→':'←'} {t.occurrence?.title})
+                                  </span>
+                                </button>
+                              )
+                            })()}
+
                             <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                              <button
-                                className="picker-btn none-btn"
-                                onClick={() => confirmCompanions(leg.id)}
-                                disabled={assigning}
-                                style={{
-                                  flex: 1, justifyContent: 'center',
-                                  background: 'rgba(79,156,249,0.12)',
-                                  color: 'var(--color-blue)',
-                                  border: '1px solid rgba(79,156,249,0.3)',
-                                  fontWeight: 600,
-                                }}
-                              >
+                              <button className="picker-btn none-btn" onClick={() => confirmCompanions(leg.id)} disabled={assigning} style={{
+                                flex: 1, justifyContent: 'center',
+                                background: 'rgba(79,156,249,0.12)', color: 'var(--color-blue)',
+                                border: '1px solid rgba(79,156,249,0.3)', fontWeight: 600,
+                              }}>
                                 {assigning
                                   ? 'Mentés…'
                                   : selectedCompanions.length === 0

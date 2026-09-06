@@ -3,6 +3,7 @@ import { Header } from '../components/Header'
 import { supabase } from '../lib/supabase'
 import { useHousehold } from '../hooks/useHousehold'
 import { useAuth } from '../lib/auth'
+import { getPref, setPref, PREF_HIDE_CANCELLED } from '../lib/prefs'
 import type { ExternalCalendar } from '../types'
 import { format } from 'date-fns'
 
@@ -14,6 +15,7 @@ export function Beallitasok() {
   const { persons, drivers, locations, travelTimes, availabilities, householdId } = useHousehold()
   const [tab, setTab] = useState<Tab>('helyszin')
   const [extCals, setExtCals] = useState<ExternalCalendar[]>([])
+  const [hideCancelled, setHideCancelled] = useState(() => getPref(PREF_HIDE_CANCELLED))
 
   useEffect(() => {
     if (!householdId) return
@@ -21,6 +23,12 @@ export function Beallitasok() {
       setExtCals(data ?? [])
     })
   }, [householdId])
+
+  function toggleHideCancelled() {
+    const v = !hideCancelled
+    setHideCancelled(v)
+    setPref(PREF_HIDE_CANCELLED, v)
+  }
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'helyszin', label: 'Helyszínek' },
@@ -32,6 +40,40 @@ export function Beallitasok() {
   return (
     <div style={{ background: 'var(--color-bg)', minHeight: '100dvh' }}>
       <Header title="Beállítások" />
+
+      {/* ── Megjelenítés ── */}
+      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--color-border)' }}>
+        <div className="section-label" style={{ marginBottom: 10 }}>Megjelenítés</div>
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '10px 14px', borderRadius: 'var(--r-md)',
+          background: 'var(--color-surface)', border: '1px solid var(--color-border)',
+        }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 500 }}>Elmaradt események elrejtése</div>
+            <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2 }}>
+              Hét és Fuvartábla nézetben nem jelenik meg az ELMARAD
+            </div>
+          </div>
+          <button
+            onClick={toggleHideCancelled}
+            style={{
+              width: 44, height: 26, borderRadius: 13, flexShrink: 0,
+              background: hideCancelled ? 'var(--color-blue)' : 'var(--color-surface-2)',
+              border: `1px solid ${hideCancelled ? 'var(--color-blue)' : 'var(--color-border)'}`,
+              cursor: 'pointer', position: 'relative', transition: 'all 0.2s',
+            }}
+          >
+            <span style={{
+              position: 'absolute', top: 3,
+              left: hideCancelled ? 20 : 3,
+              width: 18, height: 18, borderRadius: '50%',
+              background: '#fff', transition: 'left 0.2s',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+            }} />
+          </button>
+        </div>
+      </div>
 
       {/* Belső tab sor */}
       <div className="flex gap-1 px-4 py-3 overflow-x-auto"
@@ -51,7 +93,7 @@ export function Beallitasok() {
 
       <div className="px-4 pt-4 pb-20">
 
-        {/* ── Helyszínek ───────────────────────────────── */}
+        {/* ── Helyszínek ── */}
         {tab === 'helyszin' && (
           <div className="space-y-3">
             <p className="text-xs mb-4" style={{ color: 'var(--color-muted)' }}>
@@ -68,9 +110,7 @@ export function Beallitasok() {
               </div>
             ))}
             {locations.length === 0 && (
-              <p className="text-sm text-center py-8" style={{ color: 'var(--color-muted)' }}>
-                Még nincs helyszín felvéve.
-              </p>
+              <p className="text-sm text-center py-8" style={{ color: 'var(--color-muted)' }}>Még nincs helyszín felvéve.</p>
             )}
             <p className="text-xs pt-2" style={{ color: 'var(--color-border)' }}>
               Helyszíneket a Supabase Studio-ban vagy az onboarding folyamán vehetsz fel.
@@ -78,7 +118,7 @@ export function Beallitasok() {
           </div>
         )}
 
-        {/* ── Útidő mátrix ─────────────────────────────── */}
+        {/* ── Útidő mátrix ── */}
         {tab === 'utido' && (
           <div>
             <p className="text-xs mb-4" style={{ color: 'var(--color-muted)' }}>
@@ -117,7 +157,7 @@ export function Beallitasok() {
           </div>
         )}
 
-        {/* ── Elérhetőség ──────────────────────────────── */}
+        {/* ── Elérhetőség ── */}
         {tab === 'elerheto' && (
           <div className="space-y-4">
             <p className="text-xs mb-2" style={{ color: 'var(--color-muted)' }}>
@@ -152,11 +192,11 @@ export function Beallitasok() {
           </div>
         )}
 
-        {/* ── Naptárak ─────────────────────────────────── */}
+        {/* ── Naptárak ── */}
         {tab === 'naptarak' && (
           <div className="space-y-3">
             <p className="text-xs mb-2" style={{ color: 'var(--color-muted)' }}>
-              A kiírási naptár és a behúzott külső naptárak. A Last synced mutatja, mikor frissítettük utoljára.
+              A kiírási naptár és a behúzott külső naptárak.
             </p>
             {extCals.map(cal => {
               const owner = persons.find(p => p.id === cal.person_id)
@@ -185,9 +225,7 @@ export function Beallitasok() {
               )
             })}
             {extCals.length === 0 && (
-              <p className="text-sm text-center py-8" style={{ color: 'var(--color-muted)' }}>
-                Nincs behúzott naptár.
-              </p>
+              <p className="text-sm text-center py-8" style={{ color: 'var(--color-muted)' }}>Nincs behúzott naptár.</p>
             )}
           </div>
         )}
