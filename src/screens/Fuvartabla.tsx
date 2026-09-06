@@ -78,13 +78,24 @@ export function Fuvartabla() {
     })
   }
 
-  // Check if a paired leg exists (same occurrence, opposite direction)
   function pairedLeg(legId: string): LegRow | undefined {
     const leg = legs.find(l => l.id === legId)
     if (!leg) return undefined
     return legs.find(l =>
       l.occurrence_id === leg.occurrence_id &&
       l.direction !== leg.direction
+    )
+  }
+
+  /** True if driverId is already assigned to another leg that overlaps with currentLeg's time window */
+  function hasConflict(driverId: string, currentLeg: LegRow): boolean {
+    if (!currentLeg.arrive_at) return false
+    return legs.some(l =>
+      l.id !== currentLeg.id &&
+      l.driver_id === driverId &&
+      l.occurrence?.status !== 'cancelled' &&
+      l.depart_at < currentLeg.arrive_at &&
+      l.arrive_at > currentLeg.depart_at
     )
   }
 
@@ -123,7 +134,7 @@ export function Fuvartabla() {
     }
   }
 
-  const myId = person?.id
+  const myId        = person?.id
   const orphans     = legs.filter(l => !l.driver_id && l.occurrence?.status !== 'cancelled')
   const allAssigned = legs.length > 0 && orphans.length === 0
   const bannerClass = allAssigned ? 'ok' : orphans.length ? 'warn' : 'neutral'
@@ -184,15 +195,11 @@ export function Fuvartabla() {
             key={f}
             onClick={() => setFilter(f)}
             style={{
-              padding: '5px 14px',
-              borderRadius: 100,
-              fontSize: 12,
-              fontWeight: 600,
+              padding: '5px 14px', borderRadius: 100, fontSize: 12, fontWeight: 600,
               border: `1px solid ${filter === f ? 'var(--color-blue)' : 'var(--color-border)'}`,
               background: filter === f ? 'rgba(79,156,249,0.12)' : 'var(--color-surface)',
               color: filter === f ? 'var(--color-blue)' : 'var(--color-muted)',
-              cursor: 'pointer',
-              transition: 'all 0.15s',
+              cursor: 'pointer', transition: 'all 0.15s',
             }}
           >
             {f === 'all' ? 'Összes' : 'Csak én'}
@@ -296,19 +303,40 @@ export function Fuvartabla() {
                                 <span style={{ color: 'var(--color-red)' }}>⊘</span>
                                 Gazdátlan hagyás
                               </button>
-                              {drivers.map(d => (
-                                <button
-                                  key={d.id}
-                                  className={`picker-btn ${leg.driver_id === d.id ? 'selected' : ''}`}
-                                  onClick={() => pickDriver(leg.id, d.id)}
-                                  disabled={assigning}
-                                >
-                                  <div className="driver-avatar" style={{ background: d.color }}>
-                                    {d.display_name[0]}
-                                  </div>
-                                  {d.display_name}
-                                </button>
-                              ))}
+                              {drivers.map(d => {
+                                const conflict = hasConflict(d.id, leg)
+                                return (
+                                  <button
+                                    key={d.id}
+                                    className={`picker-btn ${leg.driver_id === d.id ? 'selected' : ''}`}
+                                    onClick={() => pickDriver(leg.id, d.id)}
+                                    disabled={assigning}
+                                    style={{
+                                      border: conflict
+                                        ? '1px solid rgba(239,68,68,0.35)'
+                                        : undefined,
+                                    }}
+                                  >
+                                    <div className="driver-avatar" style={{ background: d.color }}>
+                                      {d.display_name[0]}
+                                    </div>
+                                    <span style={{ flex: 1 }}>{d.display_name}</span>
+                                    {conflict && (
+                                      <span style={{
+                                        fontSize: 10, fontWeight: 600,
+                                        color: 'var(--color-red)',
+                                        background: 'rgba(239,68,68,0.1)',
+                                        border: '1px solid rgba(239,68,68,0.25)',
+                                        borderRadius: 4,
+                                        padding: '1px 5px',
+                                        flexShrink: 0,
+                                      }}>
+                                        ⚠ ütközés
+                                      </span>
+                                    )}
+                                  </button>
+                                )
+                              })}
                             </div>
                           </>
                         ) : (
@@ -328,8 +356,8 @@ export function Fuvartabla() {
                               {drivers
                                 .filter(d => d.id !== pendingDriverId)
                                 .map(d => {
-                                  const sel = selectedCompanions.includes(d.id)
-                                  const maxed = !sel && selectedCompanions.length >= 2
+                                  const sel    = selectedCompanions.includes(d.id)
+                                  const maxed  = !sel && selectedCompanions.length >= 2
                                   return (
                                     <button
                                       key={d.id}
@@ -348,7 +376,6 @@ export function Fuvartabla() {
                                 })}
                             </div>
 
-                            {/* Visszahozza is? toggle — only if a paired leg exists */}
                             {hasPaired && (
                               <button
                                 onClick={() => setReturnAlso(r => !r)}
@@ -359,22 +386,19 @@ export function Fuvartabla() {
                                   background: returnAlso ? 'rgba(45,216,138,0.08)' : 'var(--color-surface-2)',
                                   border: `1px solid ${returnAlso ? 'rgba(45,216,138,0.3)' : 'var(--color-border)'}`,
                                   color: returnAlso ? 'var(--color-green)' : 'var(--color-muted)',
-                                  cursor: 'pointer', fontSize: 12, fontWeight: 600,
-                                  transition: 'all 0.15s',
+                                  cursor: 'pointer', fontSize: 12, fontWeight: 600, transition: 'all 0.15s',
                                 }}
                               >
                                 <span style={{
                                   width: 18, height: 18, borderRadius: 4, flexShrink: 0,
                                   background: returnAlso ? 'var(--color-green)' : 'var(--color-border)',
                                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                  fontSize: 11, color: returnAlso ? '#000' : 'transparent',
-                                  transition: 'all 0.15s',
+                                  fontSize: 11, color: returnAlso ? '#000' : 'transparent', transition: 'all 0.15s',
                                 }}>✓</span>
                                 Visszahozza is — ugyanez a csapat
                               </button>
                             )}
 
-                            {/* Confirm row */}
                             <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
                               <button
                                 className="picker-btn none-btn"
