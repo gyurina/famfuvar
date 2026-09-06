@@ -12,18 +12,19 @@ export function Esemeny() {
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [editingEvent, setEditingEvent] = useState<Occurrence | null>(null)
 
   const today = format(new Date(), 'yyyy-MM-dd')
 
   // Form state
-  const [fDate,      setFDate]      = useState(today)
-  const [fTitle,     setFTitle]     = useState('')
-  const [fPersonId,  setFPersonId]  = useState('')
-  const [fStartsAt,  setFStartsAt]  = useState('08:00')
-  const [fEndsAt,    setFEndsAt]    = useState('10:00')
-  const [fLocId,     setFLocId]     = useState('')
-  const [fDropoff,   setFDropoff]   = useState(true)
-  const [fPickup,    setFPickup]    = useState(true)
+  const [fDate,     setFDate]     = useState(today)
+  const [fTitle,    setFTitle]    = useState('')
+  const [fPersonId, setFPersonId] = useState('')
+  const [fStartsAt, setFStartsAt] = useState('08:00')
+  const [fEndsAt,   setFEndsAt]   = useState('10:00')
+  const [fLocId,    setFLocId]    = useState('')
+  const [fDropoff,  setFDropoff]  = useState(true)
+  const [fPickup,   setFPickup]   = useState(true)
 
   useEffect(() => {
     if (!householdId) return
@@ -33,45 +34,80 @@ export function Esemeny() {
       .filter('template_id', 'is', null)
       .gte('on_date', today)
       .order('on_date').order('starts_at')
-      .then(({ data, error }) => { if (error) console.error('occurrence query:', error); setEvents((data as Occurrence[]) ?? []); setLoading(false) })
+      .then(({ data, error }) => {
+        if (error) console.error('occurrence query:', error)
+        setEvents((data as Occurrence[]) ?? [])
+        setLoading(false)
+      })
   }, [householdId])
 
-  function openForm() {
-    setFDate(today)
-    setFTitle('')
-    setFPersonId(children[0]?.id ?? '')
-    setFStartsAt('08:00')
-    setFEndsAt('10:00')
-    setFLocId(locations.find(l => !l.is_home)?.id ?? '')
-    setFDropoff(true)
-    setFPickup(true)
+  async function openForm(event?: Occurrence) {
+    if (event) {
+      // Edit mode — pre-fill form
+      setEditingEvent(event)
+      setFDate(event.on_date)
+      setFTitle(event.title)
+      setFPersonId(event.person_id)
+      setFStartsAt(event.starts_at.slice(0, 5))
+      setFEndsAt(event.ends_at.slice(0, 5))
+      setFLocId(event.location_id ?? '')
+      // Load existing legs to determine dropoff/pickup state
+      const { data: legs } = await supabase
+        .from('transport_leg')
+        .select('direction')
+        .eq('occurrence_id', event.id)
+      setFDropoff(legs?.some(l => l.direction === 'dropoff') ?? true)
+      setFPickup(legs?.some(l => l.direction === 'pickup') ?? true)
+    } else {
+      // New mode
+      setEditingEvent(null)
+      setFDate(today)
+      setFTitle('')
+      setFPersonId(children[0]?.id ?? '')
+      setFStartsAt('08:00')
+      setFEndsAt('10:00')
+      setFLocId(locations.find(l => !l.is_home)?.id ?? '')
+      setFDropoff(true)
+      setFPickup(true)
+    }
     setShowForm(true)
+  }
+
+  function closeForm() {
+    setShowForm(false)
+    setEditingEvent(null)
   }
 
   async function save() {
     if (!householdId || !fTitle || !fPersonId) return
     setSaving(true)
-    const loc = fLocId || null
+    const loc    = fLocId || null
     const homeId = home?.id ?? null
 
-    // Insert occurrence
-    const { data: occ } = await supabase.from('occurrence').insert({
-      household_id: householdId,
-      template_id:  null,
-      person_id:    fPersonId,
-      title:        fTitle,
-      on_date:      fDate,
-      starts_at:    fStartsAt + ':00',
-      ends_at:      fEndsAt   + ':00',
-      location_id:  loc ?? homeId,
-      status:       'planned',
-    }).select().single()
+    if (editingEvent) {
+      // UPDATE
+      const { data: updated } = await supabase.from('occurrence')
+        .update({
+          person_id:   fPersonId,
+          title:       fTitle,
+          on_date:     fDate,
+          starts_at:   fStartsAt + ':00',
+          ends_at:     fEndsAt   + ':00',
+          location_id: loc ?? homeId,
+        })
+        .eq('id', editingEvent.id)
+        .select().single()
 
-    if (occ) {
+      if (updated) {
+        setEvents(prev => prev.map(e => e.id === editingEvent.id ? updated as Occurrence : e))
+      }
+
+      // Reconcile legs: delete existing, re-insert
+      await supabase.from('transport_leg').delete().eq('occurrence_id', editingEvent.id)
       const legs = []
       if (fDropoff) legs.push({
         household_id:  householdId,
-        occurrence_id: occ.id,
+        occurrence_id: editingEvent.id,
         direction:     'dropoff',
         driver_id:     null,
         depart_at:     `${fDate}T${fStartsAt}:00+02:00`,
@@ -81,7 +117,7 @@ export function Esemeny() {
       })
       if (fPickup) legs.push({
         household_id:  householdId,
-        occurrence_id: occ.id,
+        occurrence_id: editingEvent.id,
         direction:     'pickup',
         driver_id:     null,
         depart_at:     `${fDate}T${fEndsAt}:00+02:00`,
@@ -90,13 +126,58 @@ export function Esemeny() {
         to_location:   homeId,
       })
       if (legs.length) await supabase.from('transport_leg').insert(legs)
-      setEvents(prev => [...prev, occ as Occurrence].sort((a, b) =>
-        a.on_date.localeCompare(b.on_date) || a.starts_at.localeCompare(b.starts_at)
-      ))
+
+    } else {
+      // INSERT
+      const { data: occ } = await supabase.from('occurrence').insert({
+        household_id: householdId,
+        template_id:  null,
+        person_id:    fPersonId,
+        title:        fTitle,
+        on_date:      fDate,
+        starts_at:    fStartsAt + ':00',
+        ends_at:      fEndsAt   + ':00',
+        location_id:  loc ?? homeId,
+        status:       'planned',
+      }).select().single()
+
+      if (occ) {
+        const legs = []
+        if (fDropoff) legs.push({
+          household_id:  householdId,
+          occurrence_id: occ.id,
+          direction:     'dropoff',
+          driver_id:     null,
+          depart_at:     `${fDate}T${fStartsAt}:00+02:00`,
+          arrive_at:     `${fDate}T${fStartsAt}:00+02:00`,
+          from_location: homeId,
+          to_location:   loc,
+        })
+        if (fPickup) legs.push({
+          household_id:  householdId,
+          occurrence_id: occ.id,
+          direction:     'pickup',
+          driver_id:     null,
+          depart_at:     `${fDate}T${fEndsAt}:00+02:00`,
+          arrive_at:     `${fDate}T${fEndsAt}:00+02:00`,
+          from_location: loc,
+          to_location:   homeId,
+        })
+        if (legs.length) await supabase.from('transport_leg').insert(legs)
+        setEvents(prev => [...prev, occ as Occurrence].sort((a, b) =>
+          a.on_date.localeCompare(b.on_date) || a.starts_at.localeCompare(b.starts_at)
+        ))
+      }
     }
 
     setSaving(false)
-    setShowForm(false)
+    closeForm()
+  }
+
+  async function cancelEvent(id: string) {
+    await supabase.from('occurrence').update({ status: 'cancelled' }).eq('id', id)
+    setEvents(prev => prev.map(e => e.id === id ? { ...e, status: 'cancelled' } : e))
+    closeForm()
   }
 
   // Group events by date
@@ -144,7 +225,12 @@ export function Esemeny() {
                 const child = personById(e.person_id)
                 const loc   = locationById(e.location_id)
                 return (
-                  <div key={e.id} className="leg-card" style={{ display: 'flex', marginBottom: 8 }}>
+                  <div
+                    key={e.id}
+                    className="leg-card"
+                    style={{ display: 'flex', marginBottom: 8, cursor: 'pointer', opacity: e.status === 'cancelled' ? 0.5 : 1 }}
+                    onClick={() => openForm(e)}
+                  >
                     <div className="leg-card-stripe" style={{ background: child?.color ?? 'var(--color-border)' }} />
                     <div className="leg-card-body">
                       <div style={{ flex: 1, minWidth: 0 }}>
@@ -152,20 +238,22 @@ export function Esemeny() {
                           <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums', fontSize: 13 }}>
                             {e.starts_at.slice(0, 5)}–{e.ends_at.slice(0, 5)}
                           </span>
-                          <span style={{ fontSize: 13 }}>{e.title}</span>
+                          <span style={{ fontSize: 13, textDecoration: e.status === 'cancelled' ? 'line-through' : 'none' }}>
+                            {e.title}
+                          </span>
                         </div>
                         <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2 }}>
                           {child?.display_name}{loc ? ` · ${loc.name}` : ''}
                         </div>
                       </div>
                       <div style={{
-                        padding: '4px 10px', borderRadius: 100, fontSize: 11, fontWeight: 600,
+                        display: 'flex', alignItems: 'center', gap: 5,
+                        padding: '4px 10px', borderRadius: 100, fontSize: 11, fontWeight: 600, flexShrink: 0,
                         background: e.status === 'cancelled' ? 'var(--color-surface-2)' : 'rgba(79,156,249,0.1)',
                         color: e.status === 'cancelled' ? 'var(--color-muted)' : 'var(--color-blue)',
                         border: `1px solid ${e.status === 'cancelled' ? 'var(--color-border)' : 'rgba(79,156,249,0.25)'}`,
-                        flexShrink: 0,
                       }}>
-                        {e.status === 'cancelled' ? 'Elmarad' : 'Tervezett'}
+                        {e.status === 'cancelled' ? 'Elmarad' : '✎ Szerkeszt'}
                       </div>
                     </div>
                   </div>
@@ -179,7 +267,7 @@ export function Esemeny() {
       {/* FAB */}
       {!showForm && (
         <button
-          onClick={openForm}
+          onClick={() => openForm()}
           style={{
             position: 'fixed', bottom: 80, right: 20, zIndex: 50,
             width: 52, height: 52, borderRadius: '50%',
@@ -193,12 +281,9 @@ export function Esemeny() {
 
       {/* Bottom sheet form */}
       {showForm && (
-        <div style={{
-          position: 'fixed', inset: 0, zIndex: 100,
-          background: 'rgba(0,0,0,0.6)',
-          display: 'flex', alignItems: 'flex-end',
-        }}
-          onClick={e => { if (e.target === e.currentTarget) setShowForm(false) }}
+        <div
+          style={{ position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'flex-end' }}
+          onClick={e => { if (e.target === e.currentTarget) closeForm() }}
         >
           <div style={{
             width: '100%', maxHeight: '92dvh', overflowY: 'auto',
@@ -208,27 +293,26 @@ export function Esemeny() {
             boxShadow: 'var(--shadow-popup)',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-              <div style={{ fontSize: 16, fontWeight: 700 }}>Új esemény</div>
-              <button onClick={() => setShowForm(false)}
+              <div style={{ fontSize: 16, fontWeight: 700 }}>
+                {editingEvent ? 'Esemény szerkesztése' : 'Új esemény'}
+              </div>
+              <button onClick={closeForm}
                 style={{ background: 'none', border: 'none', color: 'var(--color-muted)', fontSize: 22, cursor: 'pointer', lineHeight: 1 }}>
                 ✕
               </button>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              {/* Title */}
               <div>
                 <label style={labelStyle}>Program neve</label>
                 <input style={inputStyle} value={fTitle} onChange={e => setFTitle(e.target.value)} placeholder="pl. Zeneiskola" />
               </div>
 
-              {/* Date */}
               <div>
                 <label style={labelStyle}>Dátum</label>
                 <input type="date" style={inputStyle} value={fDate} onChange={e => setFDate(e.target.value)} />
               </div>
 
-              {/* Child */}
               <div>
                 <label style={labelStyle}>Kinek</label>
                 <select style={inputStyle} value={fPersonId} onChange={e => setFPersonId(e.target.value)}>
@@ -236,7 +320,6 @@ export function Esemeny() {
                 </select>
               </div>
 
-              {/* Times */}
               <div style={{ display: 'flex', gap: 12 }}>
                 <div style={{ flex: 1 }}>
                   <label style={labelStyle}>Kezdés</label>
@@ -248,7 +331,6 @@ export function Esemeny() {
                 </div>
               </div>
 
-              {/* Location */}
               <div>
                 <label style={labelStyle}>Helyszín</label>
                 <select style={inputStyle} value={fLocId} onChange={e => setFLocId(e.target.value)}>
@@ -257,7 +339,6 @@ export function Esemeny() {
                 </select>
               </div>
 
-              {/* Transport toggles */}
               <div>
                 <label style={labelStyle}>Szállítás</label>
                 <div style={{ display: 'flex', gap: 8 }}>
@@ -290,7 +371,21 @@ export function Esemeny() {
                   color: '#fff', border: 'none', fontWeight: 700, fontSize: 15,
                   cursor: saving || !fTitle || !fPersonId ? 'default' : 'pointer',
                 }}
-              >{saving ? 'Mentés…' : 'Esemény hozzáadása'}</button>
+              >{saving ? 'Mentés…' : editingEvent ? 'Módosítás mentése' : 'Esemény hozzáadása'}</button>
+
+              {/* Cancel event button — only in edit mode */}
+              {editingEvent && editingEvent.status !== 'cancelled' && (
+                <button
+                  onClick={() => cancelEvent(editingEvent.id)}
+                  disabled={saving}
+                  style={{
+                    padding: '11px', borderRadius: 'var(--r-md)',
+                    background: 'transparent',
+                    color: 'var(--color-red)', border: '1px solid rgba(242,107,107,0.3)',
+                    fontWeight: 600, fontSize: 14, cursor: 'pointer',
+                  }}
+                >⊘ Esemény elmarad</button>
+              )}
             </div>
           </div>
         </div>
