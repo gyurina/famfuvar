@@ -20,11 +20,11 @@ create policy "household members can manage trips"
   on trips for all
   using (
     household_id in (
-      select household_id from persons where auth_user_id = auth.uid()
+      select household_id from person where auth_user_id = auth.uid()
     )
   )
   with check (
     household_id in (
-      select household_id from persons where auth_user_id = auth.uid()
+      select household_id from person where auth_user_id = auth.uid()
     )
   );
