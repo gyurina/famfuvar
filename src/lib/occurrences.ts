@@ -51,7 +51,8 @@ export interface OccurrenceOverridePatch {
   starts_at?:  string   // 'HH:mm'
   ends_at?:    string
   location_id?: string
-  note?:       string  custom_location_text?: string | null
+  note?:       string
+  custom_location_text?: string | null
 }
 
 export async function updateOccurrence(

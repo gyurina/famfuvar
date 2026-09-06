@@ -502,15 +502,13 @@ export function Fuvartabla() {
                 {(() => {
                   if (!occ || seenOccIds.has(occ.id)) return null
                   seenOccIds.add(occ.id)
-                  return (
-                    {isAdmin && (
-                      <button
-                        onClick={e => { e.stopPropagation(); setSelectedOcc(occ as Occurrence) }}
-                        style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-muted)', fontSize: 16, padding: '0 4px', lineHeight: 1 }}
-                        title="Módosítás / Lemondás"
-                      >⋯</button>
-                    )}
-                  )
+                  return isAdmin ? (
+                    <button
+                      onClick={e => { e.stopPropagation(); setSelectedOcc(occ as Occurrence) }}
+                      style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-muted)', fontSize: 16, padding: '0 4px', lineHeight: 1 }}
+                      title="Módosítás / Lemondás"
+                    >⋯</button>
+                  ) : null
                 })()}
               </div>
               {(fromLoc || toLoc) && (
