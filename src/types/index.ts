@@ -85,6 +85,7 @@ export interface Occurrence {
   location_id: string
   status: OccurrenceStatus
   note: string | null
+  custom_location_text: string | null
   updated_by: string | null
   updated_at: string
   is_override: boolean
