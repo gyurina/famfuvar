@@ -24,11 +24,12 @@ interface Props {
   occ:       Occurrence
   template:  ScheduleTemplate | null
   locations: Location[]
+  isAdmin:   boolean   // F4: csak admin módosíthat / mondhat le
   onClose:   () => void
   onDone:    () => void   // hívja meg a szülő → adatok újratöltése
 }
 
-export function OccurrenceOverrideModal({ occ, template, locations, onClose, onDone }: Props) {
+export function OccurrenceOverrideModal({ occ, template, locations, isAdmin, onClose, onDone }: Props) {
   const [scope,  setScope]  = useState<Scope>('this')
   const [action, setAction] = useState<Action | null>(null)
   const [saving, setSaving] = useState(false)
@@ -39,6 +40,7 @@ export function OccurrenceOverrideModal({ occ, template, locations, onClose, onD
   const [endsAt,      setEndsAt]      = useState(occ.ends_at.slice(0, 5))
   const [locationId,  setLocationId]  = useState(occ.location_id)
   const [note,        setNote]        = useState(occ.note ?? '')
+  const [customLoc,   setCustomLoc]   = useState(occ.custom_location_text ?? '')
 
   const hasTemplate = !!occ.template_id && !!template
 
@@ -69,6 +71,7 @@ export function OccurrenceOverrideModal({ occ, template, locations, onClose, onD
           ends_at:     endsAt     !== occ.ends_at.slice(0, 5)   ? endsAt     : undefined,
           location_id: locationId !== occ.location_id           ? locationId : undefined,
           note:        note !== (occ.note ?? '')                 ? note       : undefined,
+          custom_location_text: customLoc !== (occ.custom_location_text ?? '') ? customLoc : undefined,
         }
         const hasChanges = Object.values(patch).some(v => v !== undefined)
         if (scope === 'this') {
@@ -83,6 +86,7 @@ export function OccurrenceOverrideModal({ occ, template, locations, onClose, onD
               starts_at:   startsAt,
               ends_at:     endsAt,
               location_id: locationId,
+              custom_location_text: customLoc || null,
             })
           }
         }
@@ -152,7 +156,7 @@ export function OccurrenceOverrideModal({ occ, template, locations, onClose, onD
         )}
 
         {/* ── Akció választó (ha még nem döntött) ── */}
-        {action === null && (
+        {action === null && isAdmin && (
           <div style={{ display: 'flex', gap: 10 }}>
             <button
               onClick={() => setAction('edit')}
@@ -235,6 +239,17 @@ export function OccurrenceOverrideModal({ occ, template, locations, onClose, onD
                   <option key={loc.id} value={loc.id}>{loc.name}</option>
                 ))}
               </select>
+            </label>
+
+            <label style={{ display: 'block', marginBottom: 18 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)', marginBottom: 5 }}>EGYSZERI CÍM (felülírja a helyszín nevét)</div>
+              <input
+                type="text"
+                value={customLoc}
+                onChange={e => setCustomLoc(e.target.value)}
+                placeholder="pl. Keleti pályaudvar, 2. kijárat"
+                style={{ width: '100%', padding: '9px 10px', borderRadius: 'var(--r-sm)', border: '1.5px solid var(--color-border)', background: 'var(--color-surface-2)', color: 'var(--color-text)', fontSize: 13, boxSizing: 'border-box' }}
+              />
             </label>
 
             <label style={{ display: 'block', marginBottom: 18 }}>
