@@ -1088,8 +1088,19 @@ export function Beallitasok() {
           </div>
         )}
 
+        {/* Verzió */}
+        <div style={{ marginTop: 24, textAlign: 'center' }}>
+          <span style={{
+            display: 'inline-block', fontSize: 11, color: 'var(--color-muted)',
+            background: 'var(--color-surface)', border: '1px solid var(--color-border)',
+            borderRadius: 100, padding: '3px 12px', letterSpacing: '0.04em',
+          }}>
+            v{__APP_VERSION__}
+          </span>
+        </div>
+
         {/* Kijelentkezés */}
-        <div style={{ marginTop: 32, paddingTop: 16, borderTop: '1px solid var(--color-border)' }}>
+        <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--color-border)' }}>
           <button onClick={signOut} style={{
             width: '100%', borderRadius: 12, padding: '12px 0', fontSize: 13,
             fontWeight: 500, cursor: 'pointer', minHeight: 44,
