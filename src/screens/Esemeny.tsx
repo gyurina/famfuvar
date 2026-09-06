@@ -30,10 +30,10 @@ export function Esemeny() {
     supabase.from('occurrence')
       .select('*')
       .eq('household_id', householdId)
-      .is('template_id', null)
+      .filter('template_id', 'is', null)
       .gte('on_date', today)
       .order('on_date').order('starts_at')
-      .then(({ data }) => { setEvents((data as Occurrence[]) ?? []); setLoading(false) })
+      .then(({ data, error }) => { if (error) console.error('occurrence query:', error); setEvents((data as Occurrence[]) ?? []); setLoading(false) })
   }, [householdId])
 
   function openForm() {
