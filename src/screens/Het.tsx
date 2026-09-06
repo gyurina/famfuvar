@@ -28,7 +28,7 @@ export function Het() {
   useEffect(() => {
     if (!householdId) return
     const from = format(days[0], 'yyyy-MM-dd')
-    const to   = format(days[6], 'yyyy-MM-dd')
+    const to   = format(addDays(days[6], 1), 'yyyy-MM-dd')
     setLoading(true)
 
     Promise.all([
@@ -39,7 +39,7 @@ export function Het() {
       supabase.from('transport_leg').select('*')
         .eq('household_id', householdId)
         .gte('depart_at', days[0].toISOString())
-        .lte('depart_at', days[6].toISOString())
+        .lte('depart_at', addDays(days[6], 1).toISOString())
         .order('depart_at'),
       supabase.from('schedule_template').select('*')
         .eq('household_id', householdId),

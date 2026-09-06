@@ -47,7 +47,7 @@ export function Fuvartabla() {
   useEffect(() => {
     if (!householdId) return
     const from = days[0].toISOString()
-    const to   = days[6].toISOString()
+    const to   = addDays(days[6], 1).toISOString()
     setLoading(true)
 
     // Offline: azonnal Dexie-ből töltünk
