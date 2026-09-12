@@ -75,7 +75,7 @@ export function PushInbox() {
         setLastRead(Date.now())
         setUnread(0)
       })
-      .finally(() => setLoading(false))
+      .then(() => setLoading(false), () => setLoading(false))
   }, [open, householdId])
 
   return (
