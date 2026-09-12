@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useHousehold } from '../hooks/useHousehold'
 import { useAuth } from '../lib/auth'
 import { getPref, setPref, PREF_HIDE_CANCELLED } from '../lib/prefs'
-import type { ExternalCalendar, Location, TravelTime, DriverAvailability, UnavailableBlock, TravelGroup, TravelGroupMember } from '../types'
+import type { ExternalCalendar, Location, TravelTime, DriverAvailability, UnavailableBlock, TravelGroup, TravelGroupMember, PushLog } from '../types'
 import { isPushSupported, isPushSubscribed, subscribeToPush, unsubscribeFromPush } from '../lib/push'
 import { startGoogleAuth, syncNow, disconnectGoogle, fetchGoogleCalendars } from '../lib/googleCalendar'
 import { forceRegenerateLegs } from '../lib/occurrences'
@@ -91,6 +91,8 @@ export function Beallitasok() {
   const [pushTargetIds, setPushTargetIds] = useState<string[]>([])
   const [pushSending, setPushSending] = useState(false)
   const [pushResult, setPushResult] = useState<string | null>(null)
+  const [pushLogs, setPushLogs] = useState<PushLog[]>([])
+  const [pushLogsLoading, setPushLogsLoading] = useState(false)
 
   async function sendCustomPush() {
     if (!householdId || !pushTitle.trim()) return
@@ -122,6 +124,37 @@ export function Beallitasok() {
     }
     setPushSending(false)
   }
+
+  useEffect(() => {
+    if (!householdId || tab !== 'push') return
+    setPushLogsLoading(true)
+    supabase.from('push_log')
+      .select('id, title, body, sent_at, target_count, sent_count, failed_count, sent_by')
+      .eq('household_id', householdId)
+      .order('sent_at', { ascending: false })
+      .limit(10)
+      .then(async ({ data: logs }) => {
+        if (!logs?.length) { setPushLogs([]); setPushLogsLoading(false); return }
+        // Count delivered/clicked from receipts
+        const logIds = logs.map(l => l.id)
+        const { data: receipts } = await supabase
+          .from('push_log_receipt')
+          .select('log_id, event')
+          .in('log_id', logIds)
+        const countMap: Record<string, { delivered: number; clicked: number }> = {}
+        for (const r of receipts ?? []) {
+          if (!countMap[r.log_id]) countMap[r.log_id] = { delivered: 0, clicked: 0 }
+          if (r.event === 'delivered') countMap[r.log_id].delivered++
+          if (r.event === 'clicked') countMap[r.log_id].clicked++
+        }
+        setPushLogs(logs.map(l => ({
+          ...l,
+          delivered_count: countMap[l.id]?.delivered ?? 0,
+          clicked_count:   countMap[l.id]?.clicked   ?? 0,
+        })) as PushLog[])
+        setPushLogsLoading(false)
+      })
+  }, [householdId, tab])
 
   useEffect(() => { setLocations(initLocations) }, [initLocations])
   useEffect(() => { setTravelTimes(initTravelTimes) }, [initTravelTimes])
@@ -1456,6 +1489,29 @@ export function Beallitasok() {
                 {pushResult}
               </div>
             )}
+
+            {/* ── Előzmények ── */}
+            <div style={{ marginTop: 20 }}>
+              <div className="section-label">Előzmények</div>
+              {pushLogsLoading ? (
+                <div style={{ textAlign: 'center', padding: 16, color: 'var(--color-muted)', fontSize: 12 }}>Betöltés…</div>
+              ) : pushLogs.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 16, color: 'var(--color-muted)', fontSize: 12 }}>Még nem volt küldés.</div>
+              ) : pushLogs.map(log => (
+                <div key={log.id} style={{
+                  borderRadius: 10, padding: '9px 12px', marginBottom: 6,
+                  background: 'var(--color-surface)', border: '1px solid var(--color-border)',
+                }}>
+                  <div style={{ fontSize: 12, fontWeight: 600 }}>{log.title}</div>
+                  <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2 }}>
+                    {format(new Date(log.sent_at), 'MM.dd HH:mm')}
+                    {' · '}✉️ {log.sent_count}/{log.target_count} küldve
+                    {' · '}📬 {log.delivered_count ?? 0} megérkezett
+                    {' · '}👆 {log.clicked_count ?? 0} megnyitva
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

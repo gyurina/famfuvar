@@ -190,3 +190,17 @@ export interface DriverBusyConflict {
   starts_at: string
   ends_at: string
 }
+
+export interface PushLog {
+  id: string
+  household_id: string
+  sent_by: string | null
+  title: string
+  body: string
+  sent_at: string
+  target_count: number
+  sent_count: number
+  failed_count: number
+  delivered_count?: number
+  clicked_count?: number
+}

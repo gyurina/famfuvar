@@ -1,4 +1,11 @@
 // Família Fuvar — Service Worker
+
+// ── Config fogadása a main thread-től ───────────────────────────────────
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'CONFIG') {
+    self.__SUPABASE_URL__ = event.data.supabaseUrl || ''
+  }
+})
 // Push értesítések + offline shell cache
 
 const CACHE = 'fuvar-v1'
@@ -27,22 +34,42 @@ self.addEventListener('fetch', (event) => {
   )
 })
 
+
+// ── Push kézbesítés mérés helper ────────────────────────────────────────
+async function reportPushReceipt(logId, eventType) {
+  if (!logId) return
+  try {
+    const supabaseUrl = self.__SUPABASE_URL__ || ''
+    if (!supabaseUrl) return
+    await fetch(`${supabaseUrl}/functions/v1/push-receipt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ log_id: logId, event: eventType, user_agent: navigator.userAgent }),
+    })
+  } catch (_) { /* best-effort */ }
+}
+
 // ── Push értesítés ──────────────────────────────────────────
 self.addEventListener('push', (event) => {
   let data = {}
   try { data = event.data?.json() ?? {} } catch { data = { title: 'Fuvar értesítés' } }
 
   const title   = data.title   ?? 'Fuvar értesítés'
+  const logId = data.log_id ?? null
   const options = {
     body:    data.body    ?? '',
     icon:    '/pwa-192x192.png',
     badge:   '/pwa-192x192.png',
     vibrate: [200, 100, 200],
-    data:    { url: data.url ?? '/fuvartabla' },
+    data:    { url: data.url ?? '/fuvartabla', log_id: logId },
     actions: [{ action: 'open', title: 'Megnyitás' }],
   }
 
-  event.waitUntil(self.registration.showNotification(title, options))
+  event.waitUntil(
+    self.registration.showNotification(title, options).then(() => {
+      return reportPushReceipt(logId, 'delivered')
+    })
+  )
 })
 
 // ── Értesítésre kattintás ───────────────────────────────────
@@ -50,12 +77,16 @@ self.addEventListener('notificationclick', (event) => {
   event.notification.close()
   const url = event.notification.data?.url ?? '/fuvartabla'
 
+  const logId = event.notification.data?.log_id ?? null
   event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((wins) => {
-      for (const w of wins) {
-        if ('focus' in w) { w.navigate?.(url); return w.focus() }
-      }
-      return clients.openWindow(url)
-    })
+    Promise.all([
+      reportPushReceipt(logId, 'clicked'),
+      clients.matchAll({ type: 'window', includeUncontrolled: true }).then((wins) => {
+        for (const w of wins) {
+          if ('focus' in w) { w.navigate?.(url); return w.focus() }
+        }
+        return clients.openWindow(url)
+      }),
+    ])
   )
 })

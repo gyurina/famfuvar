@@ -124,7 +124,7 @@ Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS })
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: CORS })
 
-  let householdId: string, personIds: string[], title: string, body: string
+  let householdId: string, personIds: string[], title: string, body: string, sentBy: string | null
   try {
     const payload = await req.json()
     householdId = payload.household_id
@@ -132,6 +132,7 @@ Deno.serve(async (req: Request) => {
     title       = payload.title
     body        = payload.body
     if (!householdId || !title) throw new Error('missing household_id or title')
+    sentBy      = payload.sent_by ?? null
   } catch (e) {
     return new Response(JSON.stringify({ error: String(e) }), { status: 400, headers: JSON_CORS })
   }
@@ -171,7 +172,21 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify({ skipped: 'no push subscriptions' }), { status: 200, headers: JSON_CORS })
   }
 
-  const notifPayload = JSON.stringify({ title, body: body ?? '', url: '/' })
+  // ── push_log: küldési naplózás ──────────────────────────────────────────
+  const { data: logRow } = await supabase
+    .from('push_log')
+    .insert({
+      household_id: householdId,
+      sent_by:      sentBy,
+      title,
+      body:         body ?? '',
+      target_count: subs.length,
+    })
+    .select('id')
+    .single()
+  const logId = logRow?.id ?? null
+
+  const notifPayload = JSON.stringify({ title, body: body ?? '', url: '/', log_id: logId })
 
   const results = await Promise.allSettled(
     subs.map(async (sub) => {
@@ -206,7 +221,11 @@ Deno.serve(async (req: Request) => {
   const failed = results.filter(r => r.status === 'rejected').length
   const errors = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected')
                         .map(r => r.reason?.message ?? String(r.reason))
+  // Update push_log counts
+  if (logId) {
+    await supabase.from('push_log').update({ sent_count: sent, failed_count: failed }).eq('id', logId)
+  }
   console.log(`notify-custom: ${sent} sent, ${failed} failed`, errors)
 
-  return new Response(JSON.stringify({ sent, failed, errors }), { status: 200, headers: JSON_CORS })
+  return new Response(JSON.stringify({ sent, failed, errors, log_id: logId }), { status: 200, headers: JSON_CORS })
 })
