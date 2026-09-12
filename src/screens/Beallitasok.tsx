@@ -629,6 +629,7 @@ export function Beallitasok() {
         for (const locId of locUsedInTpls) {
           if (locId === homeLoc.id) continue
           const loc = locs.find((l: Location) => l.id === locId)
+          if (loc?.is_tbd) continue  // TBD helyszínnek sosem lesz ismert útideje
           const name = loc?.name ?? locId
           if (!ttSet.has(`${homeLoc.id}→${locId}`)) missingRoutes.push(`Otthon→${name}`)
           if (!ttSet.has(`${locId}→${homeLoc.id}`)) missingRoutes.push(`${name}→Otthon`)
