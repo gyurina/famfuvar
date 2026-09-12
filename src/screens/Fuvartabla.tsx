@@ -28,7 +28,7 @@ type DisplayItem =
 
 export function Fuvartabla() {
   const { person } = useAuth()
-  const { isAdmin, canDriveOnly } = useRole()
+  const { isAdmin, canDriveOnly, isFilteredView } = useRole()
   const { drivers, householdId, personById, locationById, locations, travelTimes } = useHousehold()
   // F4: grandparent csak saját magát látja sofőrként
   const visibleDrivers = canDriveOnly ? drivers.filter(d => d.id === person?.id) : drivers
@@ -397,7 +397,14 @@ export function Fuvartabla() {
   // ── Derived state ────────────────────────────────────────────────────────
 
   const myId    = person?.id
-  const visLegs = hideCancelled ? legs.filter(l => l.occurrence?.status !== 'cancelled') : legs
+  const visLegs = (() => {
+    let ls = hideCancelled ? legs.filter(l => l.occurrence?.status !== 'cancelled') : legs
+    // Babysitter: only sees legs where they are the driver or companion
+    if (isFilteredView && myId) {
+      ls = ls.filter(l => l.driver_id === myId || l.companion_id === myId || l.companion2_id === myId)
+    }
+    return ls
+  })()
   const orphans     = visLegs.filter(l => !l.driver_id && !l.self_transport && l.occurrence?.status !== 'cancelled')
   const allAssigned = visLegs.length > 0 && orphans.length === 0
   const bannerClass = allAssigned ? 'ok' : orphans.length ? 'warn' : 'neutral'

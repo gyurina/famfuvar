@@ -4,14 +4,14 @@ import { supabase } from '../lib/supabase'
 import { useHousehold } from '../hooks/useHousehold'
 import { useAuth } from '../lib/auth'
 import { getPref, setPref, PREF_HIDE_CANCELLED } from '../lib/prefs'
-import type { ExternalCalendar, Location, TravelTime, DriverAvailability } from '../types'
+import type { ExternalCalendar, Location, TravelTime, DriverAvailability, UnavailableBlock } from '../types'
 import { isPushSupported, isPushSubscribed, subscribeToPush, unsubscribeFromPush } from '../lib/push'
 import { startGoogleAuth, syncNow, disconnectGoogle, fetchGoogleCalendars } from '../lib/googleCalendar'
 import { forceRegenerateLegs } from '../lib/occurrences'
 import { format } from 'date-fns'
 
 const WEEKDAYS = ['Hétfő','Kedd','Szerda','Csütörtök','Péntek','Szombat','Vasárnap']
-type Tab = 'helyszin' | 'utido' | 'elerheto' | 'naptarak' | 'diagnozis'
+type Tab = 'helyszin' | 'utido' | 'elerheto' | 'nem_elerheto' | 'naptarak' | 'push' | 'diagnozis'
 
 const inp: React.CSSProperties = {
   width: '100%', padding: '6px 10px', borderRadius: 8, fontSize: 13,
@@ -76,10 +76,90 @@ export function Beallitasok() {
   const [locations, setLocations] = useState<Location[]>([])
   const [travelTimes, setTravelTimes] = useState<TravelTime[]>([])
   const [availabilities, setAvailabilities] = useState<DriverAvailability[]>([])
+  const [unavailBlocks, setUnavailBlocks] = useState<UnavailableBlock[]>([])
+  const [unavailLoading, setUnavailLoading] = useState(false)
+  const [newUnavail, setNewUnavail] = useState<{ personId: string; weekday: number } | null>(null)
+  const [newUnavailFrom, setNewUnavailFrom] = useState('00:00')
+  const [newUnavailTo, setNewUnavailTo] = useState('23:59')
+  const [newUnavailLabel, setNewUnavailLabel] = useState('')
+  const [unavailSaving, setUnavailSaving] = useState(false)
+  const [unavailError, setUnavailError] = useState<string | null>(null)
+
+  // Custom push message state
+  const [pushTitle, setPushTitle] = useState('')
+  const [pushBody, setPushBody] = useState('')
+  const [pushTargetIds, setPushTargetIds] = useState<string[]>([])
+  const [pushSending, setPushSending] = useState(false)
+  const [pushResult, setPushResult] = useState<string | null>(null)
+
+  async function sendCustomPush() {
+    if (!householdId || !pushTitle.trim()) return
+    setPushSending(true)
+    setPushResult(null)
+    const { data: { session } } = await supabase.auth.getSession()
+    try {
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/notify-custom`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session?.access_token}`,
+          },
+          body: JSON.stringify({
+            household_id: householdId,
+            person_ids: pushTargetIds,
+            title: pushTitle.trim(),
+            body: pushBody.trim(),
+          }),
+        }
+      )
+      const json = await res.json()
+      setPushResult(`✓ Elküldve ${json.sent ?? 0} eszközre${json.failed ? ` (${json.failed} hiba)` : ''}`)
+      setPushTitle(''); setPushBody(''); setPushTargetIds([])
+    } catch (e) {
+      setPushResult(`❌ Hiba: ${String(e)}`)
+    }
+    setPushSending(false)
+  }
 
   useEffect(() => { setLocations(initLocations) }, [initLocations])
   useEffect(() => { setTravelTimes(initTravelTimes) }, [initTravelTimes])
   useEffect(() => { setAvailabilities(initAvails) }, [initAvails])
+
+  useEffect(() => {
+    if (!householdId || tab !== 'nem_elerheto') return
+    setUnavailLoading(true)
+    supabase.from('unavailable_block').select('*')
+      .eq('household_id', householdId)
+      .order('weekday').order('from_time')
+      .then(({ data }) => {
+        setUnavailBlocks((data ?? []) as UnavailableBlock[])
+        setUnavailLoading(false)
+      })
+  }, [householdId, tab])
+
+  async function addUnavailBlock() {
+    if (!householdId || !newUnavail) return
+    setUnavailSaving(true)
+    setUnavailError(null)
+    const { data, error } = await supabase.from('unavailable_block').insert({
+      household_id: householdId,
+      person_id: newUnavail.personId,
+      weekday: newUnavail.weekday,
+      from_time: newUnavailFrom + ':00',
+      to_time: newUnavailTo + ':00',
+      label: newUnavailLabel.trim() || null,
+    }).select().single()
+    if (error) { setUnavailError(error.message); setUnavailSaving(false); return }
+    setUnavailBlocks(bs => [...bs, data as UnavailableBlock])
+    setNewUnavail(null); setNewUnavailLabel(''); setUnavailSaving(false)
+  }
+
+  async function deleteUnavailBlock(id: string) {
+    await supabase.from('unavailable_block').delete().eq('id', id)
+    setUnavailBlocks(bs => bs.filter(b => b.id !== id))
+  }
 
   // Google Calendar: URL param kezelés + betöltés
   useEffect(() => {
@@ -116,7 +196,9 @@ export function Beallitasok() {
     { key: 'helyszin', label: 'Helyszínek' },
     { key: 'utido',    label: 'Útidő' },
     { key: 'elerheto', label: 'Elérhetőség' },
+    { key: 'nem_elerheto', label: 'Nem elérhető' },
     { key: 'naptarak', label: 'Naptárak' },
+    { key: 'push',      label: '📣 Üzenet' },
     { key: 'diagnozis', label: '🩺 Diagnózis' },
   ]
 
@@ -875,6 +957,111 @@ export function Beallitasok() {
             {drivers.length === 0 && (
               <p style={{ fontSize: 13, textAlign: 'center', padding: '32px 0',
                            color: 'var(--color-muted)' }}>Nincs sofőr a háztartásban.</p>
+            )}
+          </div>
+        )}
+
+        {/* ══════════════════════════════════════
+            NEM ELÉRHETŐ blokkok (inverz logika)
+        ══════════════════════════════════════ */}
+        {tab === 'nem_elerheto' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <p style={{ fontSize: 12, color: 'var(--color-muted)', margin: '0 0 4px' }}>
+              Mikor <strong>nem</strong> elérhető az adott személy. Minden más időpont szabad.
+              Figyelmeztető — nem tiltja a beosztást automatikusan.
+            </p>
+            {unavailError && (
+              <div style={{ fontSize: 12, color: '#fca5a5', padding: '6px 10px',
+                            background: '#450a0a', borderRadius: 8 }}>{unavailError}</div>
+            )}
+            {unavailLoading && (
+              <div style={{ fontSize: 13, color: 'var(--color-muted)', textAlign: 'center', padding: 24 }}>Betöltés…</div>
+            )}
+            {!unavailLoading && persons.map(person => {
+              const blocks = unavailBlocks.filter(b => b.person_id === person.id)
+              return (
+                <div key={person.id} style={{
+                  borderRadius: 12, padding: '12px 14px',
+                  background: 'var(--color-surface)', border: '1px solid var(--color-border)',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                    <span style={{ width: 22, height: 22, borderRadius: '50%', background: person.color,
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 10, color: '#fff', fontWeight: 700, flexShrink: 0 }}>
+                      {person.display_name[0]}
+                    </span>
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>{person.display_name}</span>
+                    <span style={{ fontSize: 11, color: 'var(--color-muted)', marginLeft: 2,
+                      background: 'var(--color-surface-2)', padding: '1px 6px', borderRadius: 8 }}>
+                      {person.role}
+                    </span>
+                  </div>
+                  {WEEKDAYS.map((day, i) => {
+                    const weekday = i
+                    const slots = blocks.filter(b => b.weekday === weekday)
+                    const isAdding = newUnavail?.personId === person.id && newUnavail?.weekday === weekday
+                    return (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 0',
+                                             borderTop: i > 0 ? '1px solid var(--color-border)' : 'none' }}>
+                        <span style={{ fontSize: 12, width: 60, flexShrink: 0, color: 'var(--color-muted)' }}>{day.slice(0,4)}</span>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, flex: 1 }}>
+                          {slots.map(s => (
+                            <span key={s.id} style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11,
+                              padding: '2px 8px', borderRadius: 20, background: '#450a0a', color: '#fca5a5',
+                            }}>
+                              {s.from_time.slice(0,5)}–{s.to_time.slice(0,5)}
+                              {s.label && <span style={{ opacity: 0.8 }}>· {s.label}</span>}
+                              <button onClick={() => deleteUnavailBlock(s.id)} style={{
+                                background: 'none', border: 'none', cursor: 'pointer',
+                                color: '#fca5a5', fontSize: 13, lineHeight: 1, padding: 0,
+                              }}>×</button>
+                            </span>
+                          ))}
+                          {slots.length === 0 && !isAdding && (
+                            <span style={{ fontSize: 11, color: 'var(--color-border)' }}>—</span>
+                          )}
+                        </div>
+                        {isAdding ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                            <input type="time" value={newUnavailFrom}
+                              onChange={e => setNewUnavailFrom(e.target.value)}
+                              style={{ ...inp, width: 90, padding: '4px 6px' }} />
+                            <span style={{ fontSize: 12 }}>–</span>
+                            <input type="time" value={newUnavailTo}
+                              onChange={e => setNewUnavailTo(e.target.value)}
+                              style={{ ...inp, width: 90, padding: '4px 6px' }} />
+                            <input placeholder="Megjegyzés (opcionális)"
+                              value={newUnavailLabel}
+                              onChange={e => setNewUnavailLabel(e.target.value)}
+                              style={{ ...inp, width: 140, padding: '4px 6px', fontSize: 11 }} />
+                            <button style={{ ...btnPrimary, padding: '4px 10px' }}
+                              disabled={unavailSaving} onClick={addUnavailBlock}>
+                              {unavailSaving ? '…' : '✓'}
+                            </button>
+                            <button style={{ ...btnGhost, padding: '4px 8px' }}
+                              onClick={() => { setNewUnavail(null); setUnavailError(null) }}>✕</button>
+                          </div>
+                        ) : (
+                          <button onClick={() => {
+                            setNewUnavail({ personId: person.id, weekday })
+                            setNewUnavailFrom('00:00'); setNewUnavailTo('23:59')
+                            setNewUnavailLabel('')
+                            setUnavailError(null)
+                          }} style={{
+                            background: 'none', border: '1px solid var(--color-border)',
+                            borderRadius: 6, cursor: 'pointer', color: '#fca5a5',
+                            fontSize: 14, width: 28, height: 28,
+                          }}>+</button>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })}
+            {persons.length === 0 && (
+              <p style={{ fontSize: 13, textAlign: 'center', padding: '32px 0', color: 'var(--color-muted)' }}>Nincs személy a háztartásban.</p>
             )}
           </div>
         )}
