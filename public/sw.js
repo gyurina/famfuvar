@@ -79,7 +79,7 @@ self.addEventListener('push', (event) => {
 // ── Értesítésre kattintás ───────────────────────────────────
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
-  const url = event.notification.data?.url ?? '/fuvartabla'
+  const url = event.notification.data?.url ?? '/?inbox=1'
 
   const logId = event.notification.data?.log_id ?? null
   event.waitUntil(

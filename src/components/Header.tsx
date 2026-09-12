@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom'
+import { PushInbox } from './PushInbox'
 
 interface HeaderProps {
   title: string
@@ -16,6 +17,7 @@ export function Header({ title, subtitle, action }: HeaderProps) {
           {subtitle && <div className="header-subtitle">{subtitle}</div>}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <PushInbox />
           {action}
           <button
             className="icon-btn"
