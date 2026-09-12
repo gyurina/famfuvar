@@ -419,7 +419,7 @@ export function Beallitasok() {
   function openEditGroup(g: TravelGroup & { members: TravelGroupMember[] }) {
     setEditGroup(g)
     setGroupName(g.name)
-    setGroupMemberIds(g.members.map(m => m.person_id))
+    setGroupMemberIds(g.members.map(m => m.person_id).filter((id): id is string => id !== null))
     setGroupError(null)
     setGroupDeleteConfirm(null)
     setGroupFormOpen(true)

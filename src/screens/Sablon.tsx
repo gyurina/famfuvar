@@ -2,20 +2,31 @@ import { useState, useEffect } from 'react'
 import { Header } from '../components/Header'
 import { supabase } from '../lib/supabase'
 import { useHousehold } from '../hooks/useHousehold'
-import type { ScheduleTemplate } from '../types'
+import type { ScheduleTemplate, TravelGroup } from '../types'
 import { format } from 'date-fns'
 
 const WEEKDAYS = ['Hétfő','Kedd','Szerda','Csütörtök','Péntek','Szombat','Vasárnap']
 
+type Mode = 'single' | 'group'
+
 interface FormData {
-  person_id: string; title: string; weekday: number
-  starts_at: string; ends_at: string; location_id: string
-  needs_dropoff: boolean; needs_pickup: boolean
-  valid_from: string; valid_to: string
+  mode: Mode
+  person_id: string
+  group_id: string
+  title: string
+  weekday: number
+  starts_at: string
+  ends_at: string
+  location_id: string
+  needs_dropoff: boolean
+  needs_pickup: boolean
+  valid_from: string
+  valid_to: string
 }
 
 const EMPTY: FormData = {
-  person_id: '', title: '', weekday: 1,
+  mode: 'single',
+  person_id: '', group_id: '', title: '', weekday: 1,
   starts_at: '08:00', ends_at: '10:00',
   location_id: '', needs_dropoff: true, needs_pickup: true,
   valid_from: format(new Date(), 'yyyy-MM-dd'), valid_to: '',
@@ -24,6 +35,7 @@ const EMPTY: FormData = {
 export function Sablon() {
   const { children, locations, householdId } = useHousehold()
   const [templates, setTemplates] = useState<ScheduleTemplate[]>([])
+  const [groups, setGroups] = useState<TravelGroup[]>([])
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState<ScheduleTemplate | null>(null)
   const [showForm, setShowForm] = useState(false)
@@ -36,10 +48,18 @@ export function Sablon() {
 
   useEffect(() => {
     if (!householdId) return
-    supabase.from('schedule_template').select('*')
-      .eq('household_id', householdId)
-      .order('weekday').order('starts_at')
-      .then(({ data }) => { setTemplates(data ?? []); setLoading(false) })
+    Promise.all([
+      supabase.from('schedule_template').select('*')
+        .eq('household_id', householdId)
+        .order('weekday').order('starts_at'),
+      supabase.from('travel_group').select('*')
+        .eq('household_id', householdId)
+        .order('name'),
+    ]).then(([tRes, gRes]) => {
+      setTemplates(tRes.data ?? [])
+      setGroups(gRes.data ?? [])
+      setLoading(false)
+    })
   }, [householdId])
 
   function openNew() {
@@ -52,10 +72,17 @@ export function Sablon() {
   function openEdit(t: ScheduleTemplate) {
     setEditing(t)
     setForm({
-      person_id: t.person_id, title: t.title, weekday: t.weekday,
-      starts_at: t.starts_at.slice(0, 5), ends_at: t.ends_at.slice(0, 5),
-      location_id: t.location_id, needs_dropoff: t.needs_dropoff,
-      needs_pickup: t.needs_pickup, valid_from: t.valid_from,
+      mode: t.group_id ? 'group' : 'single',
+      person_id: t.person_id ?? '',
+      group_id: t.group_id ?? '',
+      title: t.title,
+      weekday: t.weekday,
+      starts_at: t.starts_at.slice(0, 5),
+      ends_at: t.ends_at.slice(0, 5),
+      location_id: t.location_id,
+      needs_dropoff: t.needs_dropoff,
+      needs_pickup: t.needs_pickup,
+      valid_from: t.valid_from,
       valid_to: t.valid_to ?? '',
     })
     setError(null); setDeleteConfirm(null)
@@ -64,7 +91,13 @@ export function Sablon() {
 
   async function handleSave() {
     if (!householdId) return
-    if (!form.person_id || !form.location_id || !form.title) {
+    if (form.mode === 'single' && !form.person_id) {
+      setError('Válassz gyereket!'); return
+    }
+    if (form.mode === 'group' && !form.group_id) {
+      setError('Válassz csoportot!'); return
+    }
+    if (!form.location_id || !form.title) {
       setError('Töltsd ki a kötelező mezőket!'); return
     }
     if (form.starts_at >= form.ends_at) {
@@ -73,10 +106,16 @@ export function Sablon() {
     setSaving(true); setError(null)
     const payload = {
       household_id: householdId,
-      person_id: form.person_id, title: form.title, weekday: form.weekday,
-      starts_at: form.starts_at + ':00', ends_at: form.ends_at + ':00',
-      location_id: form.location_id, needs_dropoff: form.needs_dropoff,
-      needs_pickup: form.needs_pickup, valid_from: form.valid_from,
+      person_id: form.mode === 'single' ? form.person_id : null,
+      group_id: form.mode === 'group' ? form.group_id : null,
+      title: form.title,
+      weekday: form.weekday,
+      starts_at: form.starts_at + ':00',
+      ends_at: form.ends_at + ':00',
+      location_id: form.location_id,
+      needs_dropoff: form.needs_dropoff,
+      needs_pickup: form.needs_pickup,
+      valid_from: form.valid_from,
       valid_to: form.valid_to || null,
     }
     const { data, error: err } = editing
@@ -109,6 +148,7 @@ export function Sablon() {
 
   const childMap = Object.fromEntries(children.map(c => [c.id, c]))
   const locMap   = Object.fromEntries(locations.map(l => [l.id, l]))
+  const groupMap = Object.fromEntries(groups.map(g => [g.id, g]))
   const grouped  = WEEKDAYS.map((name, i) => ({
     name, weekday: i + 1,
     rows: templates.filter(t => t.weekday === i + 1),
@@ -193,8 +233,10 @@ export function Sablon() {
             <div key={g.weekday} style={{ marginBottom: 24 }}>
               <div className="section-label">{g.name}</div>
               {g.rows.map(t => {
-                const child = childMap[t.person_id]
+                const child = t.person_id ? childMap[t.person_id] : null
+                const group = t.group_id ? groupMap[t.group_id] : null
                 const loc   = locMap[t.location_id]
+                const stripeColor = child?.color ?? 'var(--color-border)'
                 return (
                   <div
                     key={t.id}
@@ -202,7 +244,7 @@ export function Sablon() {
                     style={{ display: 'flex', marginBottom: 8, cursor: 'pointer' }}
                     onClick={() => openEdit(t)}
                   >
-                    <div className="leg-card-stripe" style={{ background: child?.color ?? 'var(--color-border)' }} />
+                    <div className="leg-card-stripe" style={{ background: stripeColor }} />
                     <div className="leg-card-body">
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
@@ -210,7 +252,14 @@ export function Sablon() {
                             {t.starts_at.slice(0,5)}–{t.ends_at.slice(0,5)}
                           </span>
                           <span style={{ fontSize: 13, fontWeight: 600 }}>{t.title}</span>
-                          {child && <span style={{ fontSize: 11, color: child.color }}>{child.display_name}</span>}
+                          {child && (
+                            <span style={{ fontSize: 11, color: child.color }}>{child.display_name}</span>
+                          )}
+                          {group && (
+                            <span style={{ fontSize: 11, color: 'var(--color-blue)', background: 'rgba(79,156,249,0.1)', padding: '1px 6px', borderRadius: 'var(--r-sm)' }}>
+                              👥 {group.name}
+                            </span>
+                          )}
                         </div>
                         <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2 }}>
                           {loc?.name ?? '?'}
@@ -247,13 +296,41 @@ export function Sablon() {
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              {/* Gyerek */}
+
+              {/* Mód: Gyerek vs Csoport */}
               <div>
                 <label style={labelStyle}>Kinek *</label>
-                <select style={inputStyle} value={form.person_id} onChange={e => setForm(f => ({...f, person_id: e.target.value}))}>
-                  <option value="">Válassz…</option>
-                  {children.map(c => <option key={c.id} value={c.id}>{c.display_name}</option>)}
-                </select>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                  {([['single', '👤 Gyerek'], ['group', '👥 Csoport']] as [Mode, string][]).map(([m, label]) => (
+                    <button key={m} onClick={() => setForm(f => ({ ...f, mode: m }))}
+                      style={{
+                        flex: 1, padding: '8px 0', borderRadius: 'var(--r-sm)', border: 'none',
+                        fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                        background: form.mode === m ? 'var(--color-blue)' : 'var(--color-surface-2)',
+                        color: form.mode === m ? '#fff' : 'var(--color-muted)',
+                      }}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {form.mode === 'single' ? (
+                  <select style={inputStyle} value={form.person_id} onChange={e => setForm(f => ({...f, person_id: e.target.value}))}>
+                    <option value="">Válassz gyereket…</option>
+                    {children.map(c => <option key={c.id} value={c.id}>{c.display_name}</option>)}
+                  </select>
+                ) : (
+                  <>
+                    <select style={inputStyle} value={form.group_id} onChange={e => setForm(f => ({...f, group_id: e.target.value}))}>
+                      <option value="">Válassz csoportot…</option>
+                      {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                    </select>
+                    {groups.length === 0 && (
+                      <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 4 }}>
+                        Még nincs csoport. Hozz létre egyet a Beállítások → Csoportok fülön.
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
 
               {/* Cím */}

@@ -47,7 +47,7 @@ export function Esemeny() {
       setEditingEvent(event)
       setFDate(event.on_date)
       setFTitle(event.title)
-      setFPersonId(event.person_id)
+      setFPersonId(event.person_id ?? '')
       setFStartsAt(event.starts_at.slice(0, 5))
       setFEndsAt(event.ends_at.slice(0, 5))
       setFLocId(event.location_id ?? '')

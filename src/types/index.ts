@@ -3,7 +3,7 @@ export type BreakReason = 'illness' | 'vacation' | 'other'
 export interface BreakPeriod {
   id: string
   household_id: string
-  person_id: string
+  person_id: string | null
   date_from: string
   date_to: string
   reason: BreakReason
@@ -15,7 +15,7 @@ export interface BreakPeriod {
 export interface UnavailableBlock {
   id: string
   household_id: string
-  person_id: string
+  person_id: string | null
   weekday: number
   from_time: string
   to_time: string
@@ -64,7 +64,7 @@ export interface TravelGroup {
 
 export interface TravelGroupMember {
   group_id: string
-  person_id: string
+  person_id: string | null
 }
 
 export interface TravelTime {
@@ -77,7 +77,7 @@ export interface TravelTime {
 export interface ScheduleTemplate {
   id: string
   household_id: string
-  person_id: string
+  person_id: string | null
   title: string
   weekday: number
   starts_at: string
@@ -87,12 +87,13 @@ export interface ScheduleTemplate {
   needs_pickup: boolean
   valid_from: string
   valid_to: string | null
+  group_id: string | null
 }
 
 export interface DriverAvailability {
   id: string
   household_id: string
-  person_id: string
+  person_id: string | null
   weekday: number
   from_time: string
   to_time: string
@@ -102,7 +103,7 @@ export interface Occurrence {
   id: string
   household_id: string
   template_id: string | null
-  person_id: string
+  person_id: string | null
   title: string
   on_date: string
   starts_at: string
@@ -143,7 +144,7 @@ export interface TransportLeg {
 export interface ExternalCalendar {
   id: string
   household_id: string
-  person_id: string | null
+  person_id: string | null | null
   source: 'google' | 'ics'
   google_calendar_id: string | null
   ics_url: string | null
@@ -179,13 +180,13 @@ export interface TransportLegWithDetails extends TransportLeg {
 export interface DriverConflict {
   leg_a: string
   leg_b: string
-  person_id: string
+  person_id: string | null
   depart_at: string
 }
 
 export interface DriverBusyConflict {
   leg_id: string
-  person_id: string
+  person_id: string | null
   title: string | null
   starts_at: string
   ends_at: string
