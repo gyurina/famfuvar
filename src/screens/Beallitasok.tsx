@@ -4,14 +4,14 @@ import { supabase } from '../lib/supabase'
 import { useHousehold } from '../hooks/useHousehold'
 import { useAuth } from '../lib/auth'
 import { getPref, setPref, PREF_HIDE_CANCELLED } from '../lib/prefs'
-import type { ExternalCalendar, Location, TravelTime, DriverAvailability, UnavailableBlock } from '../types'
+import type { ExternalCalendar, Location, TravelTime, DriverAvailability, UnavailableBlock, TravelGroup, TravelGroupMember } from '../types'
 import { isPushSupported, isPushSubscribed, subscribeToPush, unsubscribeFromPush } from '../lib/push'
 import { startGoogleAuth, syncNow, disconnectGoogle, fetchGoogleCalendars } from '../lib/googleCalendar'
 import { forceRegenerateLegs } from '../lib/occurrences'
 import { format } from 'date-fns'
 
 const WEEKDAYS = ['Hétfő','Kedd','Szerda','Csütörtök','Péntek','Szombat','Vasárnap']
-type Tab = 'helyszin' | 'utido' | 'elerheto' | 'nem_elerheto' | 'naptarak' | 'push' | 'diagnozis'
+type Tab = 'helyszin' | 'utido' | 'elerheto' | 'nem_elerheto' | 'csoportok' | 'naptarak' | 'push' | 'diagnozis'
 
 const inp: React.CSSProperties = {
   width: '100%', padding: '6px 10px', borderRadius: 8, fontSize: 13,
@@ -198,6 +198,7 @@ export function Beallitasok() {
     { key: 'elerheto', label: 'Elérhetőség' },
     { key: 'nem_elerheto', label: 'Nem elérhető' },
     { key: 'naptarak', label: 'Naptárak' },
+    { key: 'csoportok', label: '👥 Csoportok' },
     { key: 'push',      label: '📣 Üzenet' },
     { key: 'diagnozis', label: '🩺 Diagnózis' },
   ]
@@ -210,6 +211,8 @@ export function Beallitasok() {
   const [newLocName, setNewLocName] = useState('')
   const [newLocAddr, setNewLocAddr] = useState('')
   const [newLocHome, setNewLocHome] = useState(false)
+  const [newLocTbd, setNewLocTbd] = useState(false)
+  const [editLocTbd, setEditLocTbd] = useState(false)
   const [locSaving, setLocSaving] = useState(false)
   const [locError, setLocError] = useState<string | null>(null)
 
@@ -217,6 +220,7 @@ export function Beallitasok() {
     setEditLocId(loc.id)
     setEditLocName(loc.name)
     setEditLocAddr(loc.address ?? '')
+    setEditLocTbd(loc.is_tbd)
     setLocError(null)
   }
 
@@ -224,12 +228,12 @@ export function Beallitasok() {
     if (!editLocId) return
     setLocSaving(true); setLocError(null)
     const { error } = await supabase.from('location')
-      .update({ name: editLocName.trim(), address: editLocAddr.trim() || null })
+      .update({ name: editLocName.trim(), address: editLocAddr.trim() || null, is_tbd: editLocTbd })
       .eq('id', editLocId)
     setLocSaving(false)
     if (error) { setLocError(error.message); return }
     setLocations(ls => ls.map(l => l.id === editLocId
-      ? { ...l, name: editLocName.trim(), address: editLocAddr.trim() || null }
+      ? { ...l, name: editLocName.trim(), address: editLocAddr.trim() || null, is_tbd: editLocTbd }
       : l))
     setEditLocId(null)
   }
@@ -249,11 +253,12 @@ export function Beallitasok() {
       name: newLocName.trim(),
       address: newLocAddr.trim() || null,
       is_home: newLocHome,
+      is_tbd: newLocTbd,
     }).select().single()
     setLocSaving(false)
     if (error) { setLocError(error.message); return }
     setLocations(ls => [...ls, data as Location])
-    setNewLocName(''); setNewLocAddr(''); setNewLocHome(false); setNewLocOpen(false)
+    setNewLocName(''); setNewLocAddr(''); setNewLocHome(false); setNewLocTbd(false); setNewLocOpen(false)
   }
 
   // ── Útidő state ──
@@ -342,6 +347,78 @@ export function Beallitasok() {
     setAvailabilities(avs => [...avs, data as DriverAvailability])
     setNewSlot(null); setNewSlotFrom('08:00'); setNewSlotTo('18:00')
   }
+
+  // ── Csoportok state ──
+  const [groups, setGroups] = useState<(TravelGroup & { members: TravelGroupMember[] })[]>([])
+  const [groupsLoading, setGroupsLoading] = useState(false)
+  const [groupFormOpen, setGroupFormOpen] = useState(false)
+  const [editGroup, setEditGroup] = useState<(TravelGroup & { members: TravelGroupMember[] }) | null>(null)
+  const [groupName, setGroupName] = useState('')
+  const [groupMemberIds, setGroupMemberIds] = useState<string[]>([])
+  const [groupSaving, setGroupSaving] = useState(false)
+  const [groupError, setGroupError] = useState<string | null>(null)
+  const [groupDeleteConfirm, setGroupDeleteConfirm] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!householdId || tab !== 'csoportok') return
+    setGroupsLoading(true)
+    supabase.from('travel_group').select('*, travel_group_member(person_id)')
+      .eq('household_id', householdId)
+      .order('name')
+      .then(({ data }) => {
+        setGroups((data ?? []).map((g: any) => ({
+          ...g,
+          members: (g.travel_group_member ?? []) as TravelGroupMember[],
+        })))
+        setGroupsLoading(false)
+      })
+  }, [householdId, tab])
+
+  function openNewGroup() {
+    setEditGroup(null)
+    setGroupName('')
+    setGroupMemberIds([])
+    setGroupError(null)
+    setGroupDeleteConfirm(null)
+    setGroupFormOpen(true)
+  }
+
+  function openEditGroup(g: TravelGroup & { members: TravelGroupMember[] }) {
+    setEditGroup(g)
+    setGroupName(g.name)
+    setGroupMemberIds(g.members.map(m => m.person_id))
+    setGroupError(null)
+    setGroupDeleteConfirm(null)
+    setGroupFormOpen(true)
+  }
+
+  async function saveGroup() {
+    if (!householdId || !groupName.trim()) { setGroupError('A csoport nevét kötelező megadni!'); return }
+    if (groupMemberIds.length < 2) { setGroupError('Legalább 2 tagot adj hozzá!'); return }
+    setGroupSaving(true); setGroupError(null)
+    if (editGroup) {
+      const { error } = await supabase.from('travel_group').update({ name: groupName.trim() }).eq('id', editGroup.id)
+      if (error) { setGroupError(error.message); setGroupSaving(false); return }
+      await supabase.from('travel_group_member').delete().eq('group_id', editGroup.id)
+      await supabase.from('travel_group_member').insert(groupMemberIds.map(pid => ({ group_id: editGroup.id, person_id: pid })))
+      setGroups(gs => gs.map(g => g.id === editGroup.id
+        ? { ...g, name: groupName.trim(), members: groupMemberIds.map(pid => ({ group_id: editGroup.id, person_id: pid })) }
+        : g))
+    } else {
+      const { data, error } = await supabase.from('travel_group').insert({ household_id: householdId, name: groupName.trim() }).select().single()
+      if (error) { setGroupError(error.message); setGroupSaving(false); return }
+      await supabase.from('travel_group_member').insert(groupMemberIds.map(pid => ({ group_id: data.id, person_id: pid })))
+      setGroups(gs => [...gs, { ...data, members: groupMemberIds.map(pid => ({ group_id: data.id, person_id: pid })) }])
+    }
+    setGroupSaving(false); setGroupFormOpen(false)
+  }
+
+  async function deleteGroup(id: string) {
+    await supabase.from('travel_group').delete().eq('id', id)
+    setGroups(gs => gs.filter(g => g.id !== id))
+    setGroupDeleteConfirm(null); setGroupFormOpen(false)
+  }
+
 
 
   // ── Diagnózis state ──────────────────────────────────────────────────────
@@ -683,6 +760,11 @@ export function Beallitasok() {
                     <input style={inp} value={editLocAddr}
                       onChange={e => setEditLocAddr(e.target.value)}
                       placeholder="Cím (opcionális)" />
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                      <input type="checkbox" checked={editLocTbd}
+                        onChange={e => setEditLocTbd(e.target.checked)} />
+                      📍? TBD helyszín
+                    </label>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button style={btnPrimary} disabled={locSaving} onClick={saveLoc}>
                         {locSaving ? '…' : 'Mentés'}
@@ -697,6 +779,10 @@ export function Beallitasok() {
                         {loc.is_home && (
                           <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 6,
                                          background: '#1e3a5f', color: '#93c5fd' }}>Otthon</span>
+                        )}
+                        {loc.is_tbd && (
+                          <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 6,
+                                         background: '#3d2e00', color: '#fbbf24' }}>📍?</span>
                         )}
                         <span style={{ fontSize: 13, fontWeight: 500 }}>{loc.name}</span>
                       </div>
@@ -737,6 +823,11 @@ export function Beallitasok() {
                   <input type="checkbox" checked={newLocHome}
                     onChange={e => setNewLocHome(e.target.checked)} />
                   Ez az otthon
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                  <input type="checkbox" checked={newLocTbd}
+                    onChange={e => setNewLocTbd(e.target.checked)} />
+                  📍? TBD helyszín
                 </label>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button style={btnPrimary} disabled={locSaving || !newLocName.trim()} onClick={addLoc}>
@@ -1212,6 +1303,99 @@ export function Beallitasok() {
           </div>
         )}
 
+
+        {tab === 'csoportok' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <p style={{ fontSize: 12, color: 'var(--color-muted)', margin: '0 0 4px' }}>
+              Fuvar-csoportok: egyszerre több személyt lehet hozzárendelni egy fuvarmenethez.
+            </p>
+
+            {groupsLoading ? (
+              <div style={{ textAlign: 'center', padding: 24, color: 'var(--color-muted)', fontSize: 13 }}>Betöltés…</div>
+            ) : groups.length === 0 && !groupFormOpen ? (
+              <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--color-muted)', fontSize: 13 }}>
+                Még nincs csoport. Hozz létre egyet!
+              </div>
+            ) : (
+              groups.map(g => (
+                <div key={g.id} style={{
+                  borderRadius: 12, padding: '10px 14px',
+                  background: 'var(--color-surface)', border: '1px solid var(--color-border)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+                }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>👥 {g.name}</div>
+                    <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                      {g.members.map(m => {
+                        const p = persons.find(pp => pp.id === m.person_id)
+                        return p ? (
+                          <span key={m.person_id} style={{
+                            padding: '1px 6px', borderRadius: 4, fontSize: 11,
+                            background: p.color + '22', color: p.color, fontWeight: 600,
+                          }}>{p.display_name}</span>
+                        ) : null
+                      })}
+                    </div>
+                  </div>
+                  <button style={btnGhost} onClick={() => openEditGroup(g)}>✎</button>
+                </div>
+              ))
+            )}
+
+            {groupFormOpen ? (
+              <div style={{
+                borderRadius: 12, padding: '14px 16px',
+                background: 'var(--color-surface)', border: '1px dashed var(--color-blue)',
+                display: 'flex', flexDirection: 'column', gap: 10,
+              }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--color-blue)' }}>
+                  {editGroup ? 'Csoport szerkesztése' : 'Új csoport'}
+                </div>
+                <input style={inp} value={groupName}
+                  onChange={e => setGroupName(e.target.value)}
+                  placeholder="Csoport neve *" />
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Tagok</div>
+                  {persons.map(p => (
+                    <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 4, cursor: 'pointer' }}>
+                      <input type="checkbox"
+                        checked={groupMemberIds.includes(p.id)}
+                        onChange={e => setGroupMemberIds(ids =>
+                          e.target.checked ? [...ids, p.id] : ids.filter(id => id !== p.id)
+                        )} />
+                      <span style={{ width: 10, height: 10, borderRadius: '50%', background: p.color, display: 'inline-block', flexShrink: 0 }} />
+                      {p.display_name}
+                    </label>
+                  ))}
+                </div>
+                {groupError && (
+                  <div style={{ fontSize: 12, color: '#fca5a5', padding: '6px 10px', background: '#450a0a', borderRadius: 8 }}>{groupError}</div>
+                )}
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button style={btnPrimary} disabled={groupSaving} onClick={saveGroup}>
+                    {groupSaving ? '…' : editGroup ? 'Mentés' : 'Létrehozás'}
+                  </button>
+                  <button style={btnGhost} onClick={() => { setGroupFormOpen(false); setGroupError(null) }}>Mégse</button>
+                  {editGroup && (
+                    groupDeleteConfirm === editGroup.id ? (
+                      <>
+                        <button style={btnDanger} onClick={() => deleteGroup(editGroup.id)}>Igen, törlöm</button>
+                        <button style={btnGhost} onClick={() => setGroupDeleteConfirm(null)}>Mégsem</button>
+                      </>
+                    ) : (
+                      <button style={btnDanger} onClick={() => setGroupDeleteConfirm(editGroup.id)}>🗑 Törlés</button>
+                    )
+                  )}
+                </div>
+              </div>
+            ) : (
+              <button onClick={openNewGroup} style={{
+                ...btnGhost, width: '100%', borderStyle: 'dashed', borderColor: 'var(--color-blue)',
+                color: 'var(--color-blue)', fontSize: 13,
+              }}>+ Új csoport</button>
+            )}
+          </div>
+        )}
 
         {tab === 'push' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
