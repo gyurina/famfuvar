@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { format, startOfWeek, addDays } from 'date-fns'
+import { format, addDays, startOfDay } from 'date-fns'
 import { hu } from 'date-fns/locale'
 import { Header } from '../components/Header'
 import { supabase } from '../lib/supabase'
@@ -66,7 +66,7 @@ export function Fuvartabla() {
 
   const hideCancelled = getPref(PREF_HIDE_CANCELLED)
   const today     = new Date()
-  const weekStart = addDays(startOfWeek(today, { weekStartsOn: 1 }), weekOffset * 7)
+  const weekStart = addDays(startOfDay(today), weekOffset * 7)
   const days      = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
 
   useEffect(() => {
