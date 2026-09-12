@@ -6,12 +6,19 @@ import { supabase } from '../lib/supabase'
 import { useHousehold } from '../hooks/useHousehold'
 import { useAuth } from '../lib/auth'
 import type { TransportLeg, Occurrence } from '../types'
+import { BreakModal } from '../components/BreakModal'
+import { QuickLogModal } from '../components/QuickLogModal'
+import { useHousehold } from '../hooks/useHousehold'
 
 type LegWithOcc = TransportLeg & { occurrence: Occurrence; companion_id?: string | null }
 
 export function Ma() {
   const { person } = useAuth()
-  const { personById, locationById, householdId } = useHousehold()
+  const { personById, locationById, householdId, persons } = useHousehold()
+  const [showBreak,    setShowBreak]    = useState(false)
+  const [breakPersonId,setBreakPersonId]= useState<string | undefined>(undefined)
+  const [showQuickLog, setShowQuickLog] = useState(false)
+  const [reloadKey,    setReloadKey]    = useState(0)
   const [allLegs, setAllLegs] = useState<LegWithOcc[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -31,7 +38,7 @@ export function Ma() {
         setAllLegs((data as LegWithOcc[]) ?? [])
         setLoading(false)
       })
-  }, [householdId, person?.id])
+  }, [householdId, person?.id, reloadKey])
 
   // Derived state — all computed from a single source of truth
   const myLegs     = allLegs.filter(l =>
@@ -278,6 +285,52 @@ export function Ma() {
             </div>
           )}
         </div>
+      )}
+      {/* Gyors akció gombsor */}
+      <div style={{
+        position: 'fixed', bottom: 'calc(56px + env(safe-area-inset-bottom, 0) + 12px)', right: 16,
+        display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'flex-end',
+      }}>
+        <button
+          onClick={() => { setBreakPersonId(undefined); setShowBreak(true) }}
+          title="Betegség / szünet rögzítése"
+          style={{
+            padding: '10px 16px', borderRadius: 100, fontSize: 12, fontWeight: 700,
+            background: 'rgba(245,200,66,0.15)', border: '1px solid rgba(245,200,66,0.4)',
+            color: 'var(--color-yellow)', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+          }}>
+          🤒 Beteg
+        </button>
+        <button
+          onClick={() => setShowQuickLog(true)}
+          title="Gyors naplézés"
+          style={{
+            width: 50, height: 50, borderRadius: '50%', fontSize: 22, fontWeight: 700,
+            background: 'var(--color-blue)', border: 'none',
+            color: '#fff', cursor: 'pointer', boxShadow: '0 3px 10px rgba(79,156,249,0.4)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+          ⚡
+        </button>
+      </div>
+
+      {/* Modals */}
+      {showBreak && householdId && (
+        <BreakModal
+          persons={persons}
+          householdId={householdId}
+          quickIllness={breakPersonId ? { personId: breakPersonId } : undefined}
+          onClose={() => setShowBreak(false)}
+          onDone={() => { setShowBreak(false); setReloadKey(k => k + 1) }}
+        />
+      )}
+      {showQuickLog && householdId && (
+        <QuickLogModal
+          householdId={householdId}
+          persons={persons}
+          onClose={() => setShowQuickLog(false)}
+          onDone={() => { setShowQuickLog(false); setReloadKey(k => k + 1) }}
+        />
       )}
     </div>
   )
