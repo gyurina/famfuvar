@@ -3,7 +3,9 @@
 -- 2. transport_leg upsert: ha a sablon változott, a leg ideje frissül
 --    (de csak ha az occurrence NEM kézzel módosított: is_override = false)
 
-create or replace function generate_horizon(
+drop function if exists generate_horizon(uuid, int);
+
+create function generate_horizon(
   p_household_id uuid,
   p_days_ahead   int default 14
 )
