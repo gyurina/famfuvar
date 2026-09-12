@@ -8,7 +8,7 @@ import type {
   Occurrence, TransportLeg, Person, Location,
   ScheduleTemplate, TravelGroup, TravelGroupMember,
   DriverAvailability, TravelTime, ExternalCalendar, ExternalEvent,
-  Trip,
+  Trip, BreakPeriod, UnavailableBlock,
 } from '../types'
 
 class FamCalDB extends Dexie {
@@ -24,6 +24,8 @@ class FamCalDB extends Dexie {
   ext_calendars!:     EntityTable<ExternalCalendar, 'id'>
   ext_events!:        EntityTable<ExternalEvent,    'id'>
   trips!:             EntityTable<Trip,             'id'>
+  break_periods!:     EntityTable<BreakPeriod,       'id'>
+  unavailable_blocks!:EntityTable<UnavailableBlock,  'id'>
   sync_queue!:        EntityTable<SyncQueueItem,    'id'>
 
   constructor() {
@@ -49,6 +51,10 @@ class FamCalDB extends Dexie {
       transport_legs: 'id, household_id, occurrence_id, direction, driver_id, depart_at, trip_id',
       // trips tábla offline cache
       trips: 'id, household_id',
+    })
+    this.version(4).stores({
+      break_periods:      'id, household_id, person_id, date_from, date_to',
+      unavailable_blocks: 'id, household_id, person_id, weekday',
     })
   }
 }

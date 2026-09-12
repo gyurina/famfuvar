@@ -29,7 +29,7 @@ type DisplayItem =
 export function Fuvartabla() {
   const { person } = useAuth()
   const { isAdmin, canDriveOnly } = useRole()
-  const { drivers, householdId, personById, locationById, locations } = useHousehold()
+  const { drivers, householdId, personById, locationById, locations, travelTimes } = useHousehold()
   // F4: grandparent csak saját magát látja sofőrként
   const visibleDrivers = canDriveOnly ? drivers.filter(d => d.id === person?.id) : drivers
   const online = useOnlineStatus()
@@ -443,6 +443,22 @@ export function Fuvartabla() {
     return `linear-gradient(to bottom, ${stops.join(', ')})`
   }
 
+
+  function travelTimeHint(leg: LegRow): string | null {
+    const locId = leg.direction === 'dropoff' ? leg.to_location : leg.from_location
+    if (!locId) return null
+    const tt = travelTimes.find(t =>
+      (leg.direction === 'dropoff' && t.to_location === locId) ||
+      (leg.direction === 'pickup'  && t.from_location === locId)
+    )
+    return tt ? `~${tt.minutes} perc` : null
+  }
+
+  function isTbdLocation(locId: string | null): boolean {
+    if (!locId) return false
+    return locations.find(l => l.id === locId)?.is_tbd ?? false
+  }
+
   // ── Render helpers ───────────────────────────────────────────────────────
 
   function renderSoloCard(leg: LegRow) {
@@ -492,6 +508,10 @@ export function Fuvartabla() {
                 <span style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
                   {format(new Date(leg.depart_at), 'HH:mm')}
                 </span>
+                {(() => { const h = travelTimeHint(leg); return h ? <span style={{ fontSize: 10, color: 'var(--color-muted)', fontVariantNumeric: 'tabular-nums' }}>({h})</span> : null })()}
+                {(isTbdLocation(leg.to_location) || isTbdLocation(leg.from_location)) && (
+                  <span title="Helyszín nincs megadva!" style={{ fontSize: 10, fontWeight: 700, color: 'var(--color-yellow)', background: 'rgba(245,200,66,0.12)', border: '1px solid rgba(245,200,66,0.3)', borderRadius: 4, padding: '1px 5px' }}>📍?</span>
+                )}
                 <span style={{ fontSize: 13 }}>
                   <DirectionBadge direction={leg.direction} /> {occ?.title ?? '?'}
                 </span>

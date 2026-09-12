@@ -1,5 +1,29 @@
+export type BreakReason = 'illness' | 'vacation' | 'other'
+
+export interface BreakPeriod {
+  id: string
+  household_id: string
+  person_id: string
+  date_from: string
+  date_to: string
+  reason: BreakReason
+  note: string | null
+  created_by: string | null
+  created_at: string
+}
+
+export interface UnavailableBlock {
+  id: string
+  household_id: string
+  person_id: string
+  weekday: number
+  from_time: string
+  to_time: string
+  label: string | null
+}
+
 // ── Enums ────────────────────────────────────────────────────────────────────
-export type PersonRole = 'parent' | 'grandparent' | 'child'
+export type PersonRole = 'parent' | 'grandparent' | 'child' | 'babysitter'
 export type OccurrenceStatus = 'planned' | 'cancelled' | 'moved'
 export type LegDirection = 'dropoff' | 'pickup'
 export type CalendarVisibility = 'full' | 'busy_only'
@@ -28,6 +52,7 @@ export interface Location {
   name: string
   address: string | null
   is_home: boolean
+  is_tbd: boolean
 }
 
 export interface TravelGroup {
