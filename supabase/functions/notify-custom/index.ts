@@ -186,7 +186,7 @@ Deno.serve(async (req: Request) => {
     .single()
   const logId = logRow?.id ?? null
 
-  const notifPayload = JSON.stringify({ title, body: body ?? '', url: '/', log_id: logId })
+  const notifPayload = JSON.stringify({ title, body: body ?? '', url: '/?inbox=1', log_id: logId })
 
   const results = await Promise.allSettled(
     subs.map(async (sub) => {
@@ -209,6 +209,10 @@ Deno.serve(async (req: Request) => {
         })
         if (!res.ok) {
           const txt = await res.text().catch(() => '')
+          // 410 Gone / 404: az előfizetés lejárt → töröljük a DB-ből
+          if (res.status === 410 || res.status === 404) {
+            await supabase.from('push_subscription').delete().eq('endpoint', sub.endpoint)
+          }
           throw new Error(`HTTP ${res.status}: ${txt}`)
         }
       } catch (e) {
