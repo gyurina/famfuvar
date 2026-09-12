@@ -16,13 +16,14 @@ type OccWithLegs = Occurrence & { legs: TransportLeg[] }
 
 export function Het() {
   const { isAdmin } = useRole()
-  const { householdId, personById, locationById, locations } = useHousehold()
+  const { householdId, personById, locationById, locations, persons } = useHousehold()
   const [weekOffset, setWeekOffset] = useState(0)
   const [items, setItems] = useState<OccWithLegs[]>([])
   const [loading, setLoading] = useState(true)
   const [templates, setTemplates] = useState<ScheduleTemplate[]>([])
   const [selectedOcc, setSelectedOcc] = useState<Occurrence | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>('list')
   const hideCancelled = getPref(PREF_HIDE_CANCELLED)
 
   const today     = new Date()
@@ -115,6 +116,11 @@ export function Het() {
         subtitle={`${format(days[0], 'MMM d.', { locale: hu })} – ${format(days[6], 'MMM d.', { locale: hu })}`}
         action={
           <div style={{ display: 'flex', gap: 4 }}>
+            <button className="week-nav-btn" onClick={() => setViewMode(m => m === 'list' ? 'grid' : 'list')}
+              title={viewMode === 'list' ? 'Rácsnézet' : 'Listanézet'}
+              style={{ fontFamily: 'monospace', fontWeight: 700 }}>
+              {viewMode === 'list' ? '⊞' : '☰'}
+            </button>
             <button className="week-nav-btn" onClick={() => setWeekOffset(o => o - 1)}>◀</button>
             <button className="week-nav-today" onClick={() => setWeekOffset(0)}>Ma</button>
             <button className="week-nav-btn" onClick={() => setWeekOffset(o => o + 1)}>▶</button>
@@ -157,7 +163,95 @@ export function Het() {
         </div>
       )}
 
-      {!loading && totalItems > 0 && (
+      {/* ─── GRID VIEW ──────────────────────────────────────────────── */}
+      {!loading && totalItems > 0 && viewMode === 'grid' && (
+        <div style={{ overflowX: 'auto', paddingBottom: 96 }}>
+          <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: 480, fontSize: 11 }}>
+            <thead>
+              <tr>
+                <th style={{ padding: '6px 8px', textAlign: 'left', fontSize: 11,
+                  color: 'var(--color-muted)', fontWeight: 600, background: 'var(--color-surface)',
+                  position: 'sticky', left: 0, zIndex: 2, borderBottom: '1px solid var(--color-border)',
+                  minWidth: 70 }}>Személy</th>
+                {grouped.map(g => (
+                  <th key={g.dateStr} style={{
+                    padding: '6px 6px', textAlign: 'center', fontSize: 11, fontWeight: 600,
+                    background: g.isToday ? 'var(--color-blue)' : 'var(--color-surface)',
+                    color: g.isToday ? '#fff' : 'var(--color-muted)',
+                    borderBottom: '1px solid var(--color-border)', minWidth: 80, maxWidth: 110,
+                  }}>
+                    <div>{g.label.slice(0,1).toUpperCase() + g.label.slice(1,4)}</div>
+                    <div style={{ fontWeight: 400, opacity: 0.8 }}>{g.dayNum}</div>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {persons.map(person => (
+                <tr key={person.id}>
+                  <td style={{
+                    padding: '6px 8px', position: 'sticky', left: 0, zIndex: 1,
+                    background: 'var(--color-bg)', borderBottom: '1px solid var(--color-border)',
+                    verticalAlign: 'top',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <span style={{ width: 18, height: 18, borderRadius: '50%', background: person.color,
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 8, color: '#fff', fontWeight: 700, flexShrink: 0 }}>
+                        {person.display_name[0]}
+                      </span>
+                      <span style={{ fontWeight: 600, fontSize: 11, color: 'var(--color-text)' }}>
+                        {person.display_name.split(' ')[0]}
+                      </span>
+                    </div>
+                  </td>
+                  {grouped.map(g => {
+                    const personItems = g.items.filter(o => o.person_id === person.id)
+                    return (
+                      <td key={g.dateStr} style={{
+                        padding: '5px 5px', verticalAlign: 'top',
+                        background: g.isToday ? 'rgba(59,130,246,0.04)' : 'transparent',
+                        borderBottom: '1px solid var(--color-border)',
+                        borderLeft: '1px solid var(--color-border)',
+                      }}>
+                        {personItems.map(occ => {
+                          const cancelled = occ.status === 'cancelled'
+                          const noDriver = occ.legs.some(l => !l.driver_id && !l.self_transport)
+                          return (
+                            <div key={occ.id} onClick={() => isAdmin ? setSelectedOcc(occ) : undefined}
+                              style={{
+                                borderRadius: 5, padding: '3px 5px', marginBottom: 3, fontSize: 10,
+                                background: cancelled ? 'rgba(239,68,68,0.08)' : 'var(--color-surface)',
+                                border: `1px solid ${cancelled ? 'rgba(239,68,68,0.2)' : (person.color ?? 'var(--color-border)')}`,
+                                borderLeft: `3px solid ${person.color ?? 'var(--color-border)'}`,
+                                opacity: cancelled ? 0.5 : 1,
+                                cursor: isAdmin ? 'pointer' : 'default',
+                              }}>
+                              <div style={{ fontWeight: 600, textDecoration: cancelled ? 'line-through' : 'none',
+                                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 90 }}>
+                                {occ.title}
+                              </div>
+                              <div style={{ color: 'var(--color-muted)', fontVariantNumeric: 'tabular-nums', fontSize: 10 }}>
+                                {occ.starts_at.slice(0,5)}
+                              </div>
+                              {noDriver && !cancelled && (
+                                <div style={{ color: 'var(--color-red)', fontWeight: 700, fontSize: 9 }}>⚠ nincs sofőr</div>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </td>
+                    )
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* ─── LIST VIEW ──────────────────────────────────────────────── */}
+      {!loading && totalItems > 0 && viewMode === 'list' && (
         <div style={{ padding: '12px 16px 96px' }}>
           {grouped.map(g => g.items.length > 0 && (
             <div key={g.dateStr} style={{ marginBottom: 28 }}>
