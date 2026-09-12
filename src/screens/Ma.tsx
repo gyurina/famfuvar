@@ -8,7 +8,6 @@ import { useAuth } from '../lib/auth'
 import type { TransportLeg, Occurrence } from '../types'
 import { BreakModal } from '../components/BreakModal'
 import { QuickLogModal } from '../components/QuickLogModal'
-import { useHousehold } from '../hooks/useHousehold'
 
 type LegWithOcc = TransportLeg & { occurrence: Occurrence; companion_id?: string | null }
 

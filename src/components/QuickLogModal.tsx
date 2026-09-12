@@ -75,7 +75,6 @@ export function QuickLogModal({ householdId, persons, onClose, onDone }: Props) 
     }
   }
 
-  const child = persons.find(p => p.role === 'child')
   const targets = persons.filter(p => p.role === 'child' || p.role === 'parent')
 
   return (

@@ -1212,6 +1212,69 @@ export function Beallitasok() {
           </div>
         )}
 
+
+        {tab === 'push' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <p style={{ fontSize: 12, color: 'var(--color-muted)', margin: '0 0 4px' }}>
+              Küldj egyedi push értesítést a háztartás tagjainak.
+            </p>
+            <div>
+              <label style={{ fontSize: 12, color: 'var(--color-muted)', display: 'block', marginBottom: 4 }}>Cím *</label>
+              <input value={pushTitle} onChange={e => setPushTitle(e.target.value)}
+                placeholder="pl. Változás a mai napon" style={{ ...inp }} maxLength={80} />
+            </div>
+            <div>
+              <label style={{ fontSize: 12, color: 'var(--color-muted)', display: 'block', marginBottom: 4 }}>Szöveg (opcionális)</label>
+              <textarea value={pushBody} onChange={e => setPushBody(e.target.value)}
+                placeholder="Részletek…" rows={3}
+                style={{ ...inp, resize: 'vertical', fontFamily: 'inherit' }} maxLength={200} />
+            </div>
+            <div>
+              <label style={{ fontSize: 12, color: 'var(--color-muted)', display: 'block', marginBottom: 6 }}>Küldés kinek</label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                <button onClick={() => setPushTargetIds([])} style={{
+                  padding: '5px 12px', borderRadius: 20, fontSize: 12, cursor: 'pointer',
+                  border: '1px solid var(--color-border)',
+                  background: pushTargetIds.length === 0 ? 'var(--color-blue)' : 'transparent',
+                  color: pushTargetIds.length === 0 ? '#fff' : 'var(--color-muted)',
+                }}>Mindenki</button>
+                {persons.map(p => {
+                  const sel = pushTargetIds.includes(p.id)
+                  return (
+                    <button key={p.id}
+                      onClick={() => setPushTargetIds(ids => sel ? ids.filter(id => id !== p.id) : [...ids, p.id])}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 5,
+                        padding: '5px 12px', borderRadius: 20, fontSize: 12, cursor: 'pointer',
+                        border: `1px solid ${sel ? p.color : 'var(--color-border)'}`,
+                        background: sel ? `${p.color}22` : 'transparent',
+                        color: sel ? p.color : 'var(--color-muted)',
+                      }}>
+                      <span style={{ width: 14, height: 14, borderRadius: '50%', background: p.color,
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 7, color: '#fff', fontWeight: 700 }}>{p.display_name[0]}</span>
+                      {p.display_name.split(' ')[0]}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+            <button onClick={sendCustomPush} disabled={pushSending || !pushTitle.trim()}
+              style={{ ...btnPrimary, width: '100%', padding: '12px 0', fontSize: 14, fontWeight: 700,
+                opacity: !pushTitle.trim() ? 0.5 : 1, cursor: !pushTitle.trim() ? 'not-allowed' : 'pointer' }}>
+              {pushSending ? '📤 Küldés…' : '📣 Push küldése'}
+            </button>
+            {pushResult && (
+              <div style={{ fontSize: 13, padding: '8px 12px', borderRadius: 8, textAlign: 'center',
+                background: pushResult.startsWith('✓') ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
+                border: `1px solid ${pushResult.startsWith('✓') ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`,
+                color: pushResult.startsWith('✓') ? '#4ade80' : '#fca5a5' }}>
+                {pushResult}
+              </div>
+            )}
+          </div>
+        )}
+
         {tab === 'diagnozis' && (
           <div style={{ padding: '16px' }}>
             <p style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 16 }}>
