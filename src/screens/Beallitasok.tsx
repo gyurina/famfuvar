@@ -4,14 +4,14 @@ import { supabase } from '../lib/supabase'
 import { useHousehold } from '../hooks/useHousehold'
 import { useAuth } from '../lib/auth'
 import { getPref, setPref, PREF_HIDE_CANCELLED } from '../lib/prefs'
-import type { ExternalCalendar, Location, TravelTime, DriverAvailability, UnavailableBlock, TravelGroup, TravelGroupMember, PushLog } from '../types'
+import type { ExternalCalendar, Location, TravelTime, DriverAvailability, UnavailableBlock, TravelGroup, TravelGroupMember, PushLog, BreakPeriod, BreakReason } from '../types'
 import { isPushSupported, isPushSubscribed, subscribeToPush, unsubscribeFromPush } from '../lib/push'
 import { startGoogleAuth, syncNow, disconnectGoogle, fetchGoogleCalendars } from '../lib/googleCalendar'
 import { forceRegenerateLegs } from '../lib/occurrences'
 import { format } from 'date-fns'
 
 const WEEKDAYS = ['Hétfő','Kedd','Szerda','Csütörtök','Péntek','Szombat','Vasárnap']
-type Tab = 'helyszin' | 'utido' | 'elerheto' | 'nem_elerheto' | 'csoportok' | 'naptarak' | 'push' | 'diagnozis'
+type Tab = 'helyszin' | 'utido' | 'elerheto' | 'nem_elerheto' | 'csoportok' | 'szunetek' | 'naptarak' | 'push' | 'diagnozis'
 
 const inp: React.CSSProperties = {
   width: '100%', padding: '6px 10px', borderRadius: 8, fontSize: 13,
@@ -232,6 +232,7 @@ export function Beallitasok() {
     { key: 'nem_elerheto', label: 'Nem elérhető' },
     { key: 'naptarak', label: 'Naptárak' },
     { key: 'csoportok', label: '👥 Csoportok' },
+    { key: 'szunetek',  label: '⏸ Szünetek' },
     { key: 'push',      label: '📣 Üzenet' },
     { key: 'diagnozis', label: '🩺 Diagnózis' },
   ]
@@ -453,6 +454,74 @@ export function Beallitasok() {
   }
 
 
+  // ── Szünet-időszakok state ───────────────────────────────────────────────
+  const [breakPeriods, setBreakPeriods] = useState<BreakPeriod[]>([])
+  const [breakLoading, setBreakLoading] = useState(false)
+  const [newBreakOpen, setNewBreakOpen] = useState(false)
+  const [newBreakPersonId, setNewBreakPersonId] = useState('')
+  const [newBreakFrom, setNewBreakFrom] = useState('')
+  const [newBreakTo, setNewBreakTo] = useState('')
+  const [newBreakReason, setNewBreakReason] = useState<BreakReason>('vacation')
+  const [newBreakNote, setNewBreakNote] = useState('')
+  const [breakSaving, setBreakSaving] = useState(false)
+  const [breakError, setBreakError] = useState<string | null>(null)
+  const [breakMsg, setBreakMsg] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!householdId || tab !== 'szunetek') return
+    setBreakLoading(true)
+    supabase.from('break_period').select('*')
+      .eq('household_id', householdId)
+      .order('date_from', { ascending: false })
+      .then(({ data }) => {
+        setBreakPeriods((data ?? []) as BreakPeriod[])
+        setBreakLoading(false)
+      })
+  }, [householdId, tab])
+
+  async function addBreakPeriod() {
+    if (!householdId || !newBreakPersonId || !newBreakFrom || !newBreakTo) {
+      setBreakError('Töltsd ki az összes kötelező mezőt (személy, dátum)')
+      return
+    }
+    if (newBreakFrom > newBreakTo) {
+      setBreakError('A kezdő dátum nem lehet nagyobb a végdátumnál')
+      return
+    }
+    setBreakSaving(true); setBreakError(null); setBreakMsg(null)
+    const { data, error } = await supabase.from('break_period').insert({
+      household_id: householdId,
+      person_id: newBreakPersonId,
+      date_from: newBreakFrom,
+      date_to: newBreakTo,
+      reason: newBreakReason,
+      note: newBreakNote.trim() || null,
+    }).select().single()
+    if (error) { setBreakError(error.message); setBreakSaving(false); return }
+    const bp = data as BreakPeriod
+    setBreakPeriods(bs => [bp, ...bs])
+    // Apply: cancel occurrences in the range
+    const { data: cnt } = await supabase.rpc('apply_break_period', { p_break_id: bp.id })
+    setBreakMsg(`✓ Szünet mentve — ${cnt ?? 0} alkalom lemondva`)
+    setNewBreakOpen(false)
+    setNewBreakPersonId(''); setNewBreakFrom(''); setNewBreakTo('')
+    setNewBreakReason('vacation'); setNewBreakNote('')
+    setBreakSaving(false)
+  }
+
+  async function deleteBreakPeriod(bp: BreakPeriod) {
+    if (!confirm('Töröljük a szünetet? A törölt szünet emiatt lemondott alkalmak visszakerülnek tervezettbe.')) return
+    setBreakMsg(null)
+    const { data: cnt } = await supabase.rpc('revert_break_period', {
+      p_household_id: bp.household_id,
+      p_person_id: bp.person_id,
+      p_date_from: bp.date_from,
+      p_date_to: bp.date_to,
+    })
+    await supabase.from('break_period').delete().eq('id', bp.id)
+    setBreakPeriods(bs => bs.filter(b => b.id !== bp.id))
+    setBreakMsg(`↩ Szünet törölve — ${cnt ?? 0} alkalom visszaállítva`)
+  }
 
   // ── Diagnózis state ──────────────────────────────────────────────────────
   type DiagSeverity = 'ok' | 'warn' | 'error'
@@ -1513,6 +1582,152 @@ export function Beallitasok() {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+
+        {/* ══════════════════════════════════════
+            SZÜNETEK
+        ══════════════════════════════════════ */}
+        {tab === 'szunetek' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <p style={{ fontSize: 12, color: 'var(--color-muted)', margin: '0 0 4px' }}>
+              Szünet-időszak megadásával az adott személy összes eseménye automatikusan lemondásra kerül a megjelölt napokra.
+              Törléskor a sablon-alapú alkalmak visszakerülnek „tervezett" státuszba.
+            </p>
+
+            {breakMsg && (
+              <div style={{ fontSize: 12, color: '#86efac', padding: '8px 12px',
+                            background: 'rgba(16,185,129,0.1)', borderRadius: 8 }}>
+                {breakMsg}
+              </div>
+            )}
+            {breakError && (
+              <div style={{ fontSize: 12, color: '#fca5a5', padding: '8px 12px',
+                            background: '#450a0a', borderRadius: 8 }}>
+                {breakError}
+              </div>
+            )}
+
+            {/* Új szünet */}
+            {!newBreakOpen ? (
+              <button style={btnPrimary} onClick={() => { setNewBreakOpen(true); setBreakError(null); setBreakMsg(null) }}>
+                + Új szünet hozzáadása
+              </button>
+            ) : (
+              <div style={{
+                borderRadius: 12, padding: '14px',
+                background: 'var(--color-surface)', border: '1px solid var(--color-border)',
+                display: 'flex', flexDirection: 'column', gap: 10,
+              }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Új szünet-időszak
+                </div>
+
+                {/* Személy */}
+                <div>
+                  <div style={{ fontSize: 12, color: 'var(--color-muted)', marginBottom: 4 }}>Személy *</div>
+                  <select style={inp} value={newBreakPersonId} onChange={e => setNewBreakPersonId(e.target.value)}>
+                    <option value="">– válassz –</option>
+                    {persons.map(p => (
+                      <option key={p.id} value={p.id}>{p.display_name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Dátumok */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 12, color: 'var(--color-muted)', marginBottom: 4 }}>Tól *</div>
+                    <input type="date" style={inp} value={newBreakFrom}
+                      onChange={e => setNewBreakFrom(e.target.value)} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, color: 'var(--color-muted)', marginBottom: 4 }}>Ig *</div>
+                    <input type="date" style={inp} value={newBreakTo}
+                      onChange={e => setNewBreakTo(e.target.value)} />
+                  </div>
+                </div>
+
+                {/* Ok */}
+                <div>
+                  <div style={{ fontSize: 12, color: 'var(--color-muted)', marginBottom: 4 }}>Ok</div>
+                  <select style={inp} value={newBreakReason}
+                    onChange={e => setNewBreakReason(e.target.value as BreakReason)}>
+                    <option value="vacation">Szünet / vakáció</option>
+                    <option value="illness">Betegség</option>
+                    <option value="other">Egyéb</option>
+                  </select>
+                </div>
+
+                {/* Megjegyzés */}
+                <div>
+                  <div style={{ fontSize: 12, color: 'var(--color-muted)', marginBottom: 4 }}>Megjegyzés</div>
+                  <input style={inp} value={newBreakNote} placeholder="pl. téli szünet, influenza…"
+                    onChange={e => setNewBreakNote(e.target.value)} />
+                </div>
+
+                <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                  <button style={btnPrimary} disabled={breakSaving} onClick={addBreakPeriod}>
+                    {breakSaving ? '…' : '✓ Mentés'}
+                  </button>
+                  <button style={btnGhost} onClick={() => { setNewBreakOpen(false); setBreakError(null) }}>
+                    Mégse
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Lista */}
+            {breakLoading ? (
+              <div style={{ fontSize: 13, color: 'var(--color-muted)', padding: '12px 0' }}>Betöltés…</div>
+            ) : breakPeriods.length === 0 ? (
+              <div style={{ fontSize: 13, color: 'var(--color-muted)', padding: '12px 0', textAlign: 'center' }}>
+                Még nincs rögzített szünet-időszak.
+              </div>
+            ) : breakPeriods.map(bp => {
+              const person = persons.find(p => p.id === bp.person_id)
+              const reasonLabel = bp.reason === 'illness' ? 'Betegség'
+                                : bp.reason === 'vacation' ? 'Szünet'
+                                : 'Egyéb'
+              const reasonColor = bp.reason === 'illness' ? '#fca5a5'
+                                : bp.reason === 'vacation' ? '#93c5fd'
+                                : 'var(--color-muted)'
+              return (
+                <div key={bp.id} style={{
+                  borderRadius: 12, padding: '12px 14px',
+                  background: 'var(--color-surface)', border: '1px solid var(--color-border)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+                }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      {person && (
+                        <span style={{
+                          display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
+                          background: person.color, flexShrink: 0,
+                        }} />
+                      )}
+                      <span style={{ fontSize: 13, fontWeight: 600 }}>
+                        {person?.display_name ?? bp.person_id}
+                      </span>
+                      <span style={{
+                        fontSize: 11, padding: '2px 6px', borderRadius: 6,
+                        background: 'var(--color-surface-2)', color: reasonColor,
+                      }}>{reasonLabel}</span>
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--color-muted)', marginTop: 3 }}>
+                      {bp.date_from === bp.date_to
+                        ? bp.date_from
+                        : `${bp.date_from} – ${bp.date_to}`}
+                      {bp.note && <span style={{ marginLeft: 6 }}>· {bp.note}</span>}
+                    </div>
+                  </div>
+                  <button style={btnDanger} onClick={() => deleteBreakPeriod(bp)} title="Szünet törlése">
+                    🗑
+                  </button>
+                </div>
+              )
+            })}
           </div>
         )}
 

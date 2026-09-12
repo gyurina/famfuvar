@@ -14,7 +14,7 @@ interface FormData {
   person_id: string
   group_id: string
   title: string
-  weekday: number
+  weekdays: number[]
   starts_at: string
   ends_at: string
   location_id: string
@@ -26,7 +26,7 @@ interface FormData {
 
 const EMPTY: FormData = {
   mode: 'single',
-  person_id: '', group_id: '', title: '', weekday: 1,
+  person_id: '', group_id: '', title: '', weekdays: [1],
   starts_at: '08:00', ends_at: '10:00',
   location_id: '', needs_dropoff: true, needs_pickup: true,
   valid_from: format(new Date(), 'yyyy-MM-dd'), valid_to: '',
@@ -76,7 +76,7 @@ export function Sablon() {
       person_id: t.person_id ?? '',
       group_id: t.group_id ?? '',
       title: t.title,
-      weekday: t.weekday,
+      weekdays: [t.weekday],
       starts_at: t.starts_at.slice(0, 5),
       ends_at: t.ends_at.slice(0, 5),
       location_id: t.location_id,
@@ -103,13 +103,15 @@ export function Sablon() {
     if (form.starts_at >= form.ends_at) {
       setError('A befejezési időnek a kezdési idő után kell lennie!'); return
     }
+    if (form.weekdays.length === 0) {
+      setError('Válassz legalább egy napot!'); return
+    }
     setSaving(true); setError(null)
-    const payload = {
+    const basePayload = {
       household_id: householdId,
       person_id: form.mode === 'single' ? form.person_id : null,
       group_id: form.mode === 'group' ? form.group_id : null,
       title: form.title,
-      weekday: form.weekday,
       starts_at: form.starts_at + ':00',
       ends_at: form.ends_at + ':00',
       location_id: form.location_id,
@@ -118,13 +120,23 @@ export function Sablon() {
       valid_from: form.valid_from,
       valid_to: form.valid_to || null,
     }
-    const { data, error: err } = editing
-      ? await supabase.from('schedule_template').update(payload).eq('id', editing.id).select().single()
-      : await supabase.from('schedule_template').insert(payload).select().single()
-    if (err) { setError(err.message); setSaving(false); return }
-    setTemplates(prev =>
-      editing ? prev.map(t => t.id === editing.id ? data : t) : [...prev, data]
-    )
+
+    if (editing) {
+      // Edit: always single weekday (the first selected)
+      const payload = { ...basePayload, weekday: form.weekdays[0] ?? 1 }
+      const { data, error: err } = await supabase
+        .from('schedule_template').update(payload).eq('id', editing.id).select().single()
+      if (err) { setError(err.message); setSaving(false); return }
+      setTemplates(prev => prev.map(t => t.id === editing.id ? data : t))
+    } else {
+      // Create: one template per selected weekday
+      const inserts = form.weekdays.map(wd => ({ ...basePayload, weekday: wd }))
+      const { data, error: err } = await supabase
+        .from('schedule_template').insert(inserts).select()
+      if (err) { setError(err.message); setSaving(false); return }
+      setTemplates(prev => [...prev, ...(data ?? [])])
+    }
+
     setSaving(false); setShowForm(false)
   }
 
@@ -340,22 +352,66 @@ export function Sablon() {
                   onChange={e => setForm(f => ({...f, title: e.target.value}))} />
               </div>
 
-              {/* Nap */}
+              {/* Nap(ok) – szerkesztéskor egyszeres, létrehozáskor többszörös */}
               <div>
-                <label style={labelStyle}>Nap</label>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  {WEEKDAYS.map((d, i) => (
-                    <button key={i} onClick={() => setForm(f => ({...f, weekday: i+1}))}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <label style={labelStyle}>
+                    {editing ? 'Nap' : 'Nap(ok)'}
+                  </label>
+                  {!editing && (
+                    <button
+                      type="button"
+                      onClick={() => setForm(f => ({
+                        ...f,
+                        weekdays: f.weekdays.length === 5 && f.weekdays.every(d => d <= 5)
+                          ? [1] : [1, 2, 3, 4, 5],
+                      }))}
                       style={{
-                        flex: 1, padding: '8px 0', borderRadius: 'var(--r-sm)', border: 'none',
-                        fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                        background: form.weekday === i+1 ? 'var(--color-blue)' : 'var(--color-surface-2)',
-                        color: form.weekday === i+1 ? '#fff' : 'var(--color-muted)',
+                        fontSize: 11, padding: '2px 8px', borderRadius: 6, border: 'none',
+                        cursor: 'pointer', fontWeight: 600,
+                        background: form.weekdays.length === 5 && form.weekdays.every(d => d <= 5)
+                          ? 'var(--color-blue)' : 'var(--color-surface-2)',
+                        color: form.weekdays.length === 5 && form.weekdays.every(d => d <= 5)
+                          ? '#fff' : 'var(--color-muted)',
                       }}>
-                      {d[0]}
+                      H–P
                     </button>
-                  ))}
+                  )}
                 </div>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  {WEEKDAYS.map((d, i) => {
+                    const wd = i + 1
+                    const selected = form.weekdays.includes(wd)
+                    return (
+                      <button key={i} type="button"
+                        onClick={() => {
+                          if (editing) {
+                            setForm(f => ({ ...f, weekdays: [wd] }))
+                          } else {
+                            setForm(f => ({
+                              ...f,
+                              weekdays: selected
+                                ? f.weekdays.filter(w => w !== wd)
+                                : [...f.weekdays, wd].sort((a, b) => a - b),
+                            }))
+                          }
+                        }}
+                        style={{
+                          flex: 1, padding: '8px 0', borderRadius: 'var(--r-sm)', border: 'none',
+                          fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                          background: selected ? 'var(--color-blue)' : 'var(--color-surface-2)',
+                          color: selected ? '#fff' : 'var(--color-muted)',
+                        }}>
+                        {d[0]}
+                      </button>
+                    )
+                  })}
+                </div>
+                {!editing && form.weekdays.length > 1 && (
+                  <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 4 }}>
+                    {form.weekdays.length} napra hoz létre sablont
+                  </div>
+                )}
               </div>
 
               {/* Idő */}

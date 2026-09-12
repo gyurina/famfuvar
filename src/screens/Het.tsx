@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { format, startOfWeek, addDays, isToday } from 'date-fns'
 import { hu } from 'date-fns/locale'
 import { Header } from '../components/Header'
@@ -25,6 +25,11 @@ export function Het() {
   const [reloadKey, setReloadKey] = useState(0)
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list')
   const hideCancelled = getPref(PREF_HIDE_CANCELLED)
+
+  // Drag-and-drop state
+  const [dragOccId, setDragOccId] = useState<string | null>(null)
+  const [dragOverDate, setDragOverDate] = useState<string | null>(null)
+  const dragOccRef = useRef<string | null>(null)
 
   const today     = new Date()
   const weekStart = addDays(startOfWeek(today, { weekStartsOn: 1 }), weekOffset * 7)
@@ -54,11 +59,9 @@ export function Het() {
       setItems(occs.map(o => ({ ...o, legs: legs.filter(l => l.occurrence_id === o.id) })))
       setTemplates((tplRes.data ?? []) as ScheduleTemplate[])
       setLoading(false)
-      // Cache for offline use
       db.occurrences.bulkPut(occs).catch(() => {})
       db.transport_legs.bulkPut(legs).catch(() => {})
     }).catch(async () => {
-      // Supabase hiba / offline → Dexie fallback
       try {
         const cachedOccs = await db.occurrences
           .where('on_date').between(from, to, true, true)
@@ -74,7 +77,32 @@ export function Het() {
     })
   }, [householdId, weekOffset, reloadKey])
 
-  // Build transfer map: legId → { pairedLegId, pairedOccTitle, pairedDirection }
+  // Drag handler: move occurrence to new date
+  async function handleDrop(targetDate: string) {
+    const occId = dragOccRef.current
+    setDragOccId(null); setDragOverDate(null); dragOccRef.current = null
+    if (!occId) return
+    const occ = items.find(o => o.id === occId)
+    if (!occ || occ.on_date === targetDate) return
+
+    // Optimistic update
+    setItems(prev => prev.map(o =>
+      o.id === occId ? { ...o, on_date: targetDate, is_override: true } : o
+    ))
+
+    const { error } = await supabase.from('occurrence').update({
+      on_date: targetDate,
+      is_override: true,
+      updated_at: new Date().toISOString(),
+    }).eq('id', occId)
+
+    if (error) {
+      // Revert on failure
+      setReloadKey(k => k + 1)
+    }
+  }
+
+  // Transfer (körút) map
   const transferMap = new Map<string, { pairedLegId: string; pairedOccTitle: string; pairedDir: string }>()
   const allLegsWithPerson = items.flatMap(o =>
     o.legs.map(l => ({ ...l, personId: o.person_id, occTitle: o.title }))
@@ -108,6 +136,7 @@ export function Het() {
   })
 
   const totalItems = grouped.reduce((s, g) => s + g.items.length, 0)
+  const isDragging = dragOccId !== null
 
   return (
     <div style={{ background: 'var(--color-bg)', minHeight: '100dvh' }}>
@@ -155,7 +184,7 @@ export function Het() {
         <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--color-muted)', fontSize: 13 }}>Betöltés…</div>
       )}
 
-      {!loading && totalItems === 0 && (
+      {!loading && totalItems === 0 && !isDragging && (
         <div className="empty-state" style={{ marginTop: 32 }}>
           <div className="icon">📅</div>
           <div className="title">Nincs program ezen a héten</div>
@@ -164,7 +193,7 @@ export function Het() {
       )}
 
       {/* ─── GRID VIEW ──────────────────────────────────────────────── */}
-      {!loading && totalItems > 0 && viewMode === 'grid' && (
+      {!loading && viewMode === 'grid' && (
         <div style={{ overflowX: 'auto', paddingBottom: 96 }}>
           <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: 480, fontSize: 11 }}>
             <thead>
@@ -207,25 +236,37 @@ export function Het() {
                   </td>
                   {grouped.map(g => {
                     const personItems = g.items.filter(o => o.person_id === person.id)
+                    const isDropTarget = isDragging && dragOverDate === g.dateStr
                     return (
-                      <td key={g.dateStr} style={{
-                        padding: '5px 5px', verticalAlign: 'top',
-                        background: g.isToday ? 'rgba(59,130,246,0.04)' : 'transparent',
-                        borderBottom: '1px solid var(--color-border)',
-                        borderLeft: '1px solid var(--color-border)',
-                      }}>
+                      <td key={g.dateStr}
+                        onDragOver={e => { e.preventDefault(); setDragOverDate(g.dateStr) }}
+                        onDragLeave={() => setDragOverDate(null)}
+                        onDrop={() => handleDrop(g.dateStr)}
+                        style={{
+                          padding: '5px 5px', verticalAlign: 'top',
+                          background: isDropTarget
+                            ? 'rgba(79,156,249,0.12)'
+                            : g.isToday ? 'rgba(59,130,246,0.04)' : 'transparent',
+                          borderBottom: '1px solid var(--color-border)',
+                          borderLeft: `1px solid ${isDropTarget ? 'rgba(79,156,249,0.5)' : 'var(--color-border)'}`,
+                          transition: 'background 0.15s',
+                        }}>
                         {personItems.map(occ => {
                           const cancelled = occ.status === 'cancelled'
                           const noDriver = occ.legs.some(l => !l.driver_id && !l.self_transport)
                           return (
-                            <div key={occ.id} onClick={() => isAdmin ? setSelectedOcc(occ) : undefined}
+                            <div key={occ.id}
+                              draggable={isAdmin}
+                              onDragStart={() => { dragOccRef.current = occ.id; setDragOccId(occ.id) }}
+                              onDragEnd={() => { setDragOccId(null); setDragOverDate(null); dragOccRef.current = null }}
+                              onClick={() => isAdmin ? setSelectedOcc(occ) : undefined}
                               style={{
                                 borderRadius: 5, padding: '3px 5px', marginBottom: 3, fontSize: 10,
                                 background: cancelled ? 'rgba(239,68,68,0.08)' : 'var(--color-surface)',
                                 border: `1px solid ${cancelled ? 'rgba(239,68,68,0.2)' : (person.color ?? 'var(--color-border)')}`,
                                 borderLeft: `3px solid ${person.color ?? 'var(--color-border)'}`,
-                                opacity: cancelled ? 0.5 : 1,
-                                cursor: isAdmin ? 'pointer' : 'default',
+                                opacity: dragOccId === occ.id ? 0.4 : cancelled ? 0.5 : 1,
+                                cursor: isAdmin ? 'grab' : 'default',
                               }}>
                               <div style={{ fontWeight: 600, textDecoration: cancelled ? 'line-through' : 'none',
                                 whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 90 }}>
@@ -240,6 +281,13 @@ export function Het() {
                             </div>
                           )
                         })}
+                        {isDropTarget && (
+                          <div style={{
+                            height: 30, border: '2px dashed rgba(79,156,249,0.5)',
+                            borderRadius: 5, display: 'flex', alignItems: 'center',
+                            justifyContent: 'center', fontSize: 10, color: 'var(--color-blue)',
+                          }}>ide</div>
+                        )}
                       </td>
                     )
                   })}
@@ -251,139 +299,205 @@ export function Het() {
       )}
 
       {/* ─── LIST VIEW ──────────────────────────────────────────────── */}
-      {!loading && totalItems > 0 && viewMode === 'list' && (
+      {!loading && viewMode === 'list' && (
         <div style={{ padding: '12px 16px 96px' }}>
-          {grouped.map(g => g.items.length > 0 && (
-            <div key={g.dateStr} style={{ marginBottom: 28 }}>
-              {/* Day header */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                <div style={{
-                  width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 13, fontWeight: 700,
-                  background: g.isToday ? 'var(--color-blue)' : 'var(--color-surface-2)',
-                  color: g.isToday ? '#fff' : 'var(--color-text)',
-                }}>
-                  {g.dayNum}
+          {grouped.map(g => {
+            const isDropTarget = isDragging && dragOverDate === g.dateStr
+            const showDay = g.items.length > 0 || isDropTarget
+            if (!showDay) return null
+            return (
+              <div key={g.dateStr} style={{ marginBottom: 28 }}>
+                {/* Day header — also a drop zone */}
+                <div
+                  onDragOver={e => { e.preventDefault(); setDragOverDate(g.dateStr) }}
+                  onDragLeave={e => {
+                    // Only clear if not entering a child element of this section
+                    if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverDate(null)
+                  }}
+                  onDrop={() => handleDrop(g.dateStr)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10,
+                    padding: isDropTarget ? '6px 8px' : '0',
+                    borderRadius: isDropTarget ? 'var(--r-md)' : 0,
+                    background: isDropTarget ? 'rgba(79,156,249,0.08)' : 'transparent',
+                    border: isDropTarget ? '2px dashed rgba(79,156,249,0.4)' : '2px solid transparent',
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  <div style={{
+                    width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 13, fontWeight: 700,
+                    background: g.isToday ? 'var(--color-blue)' : 'var(--color-surface-2)',
+                    color: g.isToday ? '#fff' : 'var(--color-text)',
+                  }}>
+                    {g.dayNum}
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600, textTransform: 'capitalize' }}>{g.label}</div>
+                    <div style={{ fontSize: 11, color: 'var(--color-muted)' }}>{format(g.date, 'MMMM d.', { locale: hu })}</div>
+                  </div>
+                  {isDropTarget && (
+                    <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--color-blue)', fontWeight: 600 }}>
+                      ↓ ide húzva
+                    </span>
+                  )}
                 </div>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, textTransform: 'capitalize' }}>{g.label}</div>
-                  <div style={{ fontSize: 11, color: 'var(--color-muted)' }}>{format(g.date, 'MMMM d.', { locale: hu })}</div>
-                </div>
-              </div>
 
-              {/* Occurrences */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingLeft: 8 }}>
-                {g.items.map(occ => {
-                  const child    = personById(occ.person_id)
-                  const loc      = locationById(occ.location_id)
-                  const cancelled = occ.status === 'cancelled'
-                  const dropoff  = occ.legs.find(l => l.direction === 'dropoff')
-                  const pickup   = occ.legs.find(l => l.direction === 'pickup')
+                {/* Occurrences */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingLeft: 8 }}>
+                  {g.items.map(occ => {
+                    const child    = personById(occ.person_id)
+                    const loc      = locationById(occ.location_id)
+                    const cancelled = occ.status === 'cancelled'
+                    const dropoff  = occ.legs.find(l => l.direction === 'dropoff')
+                    const pickup   = occ.legs.find(l => l.direction === 'pickup')
 
-                  return (
-                    <div key={occ.id} style={{
-                      borderRadius: 'var(--r-md)', background: 'var(--color-surface)',
-                      border: '1px solid var(--color-border)', overflow: 'hidden',
-                      opacity: cancelled ? 0.5 : 1,
-                    }}>
-                      {/* Occurrence header */}
-                      <div style={{ display: 'flex', alignItems: 'stretch', borderLeft: `3px solid ${child?.color ?? 'var(--color-border)'}` }}>
-                        <div style={{ padding: '10px 12px', flex: 1, minWidth: 0 }}>
-                          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
-                            <span style={{ fontSize: 12, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--color-muted)' }}>
-                              {occ.starts_at.slice(0, 5)}–{occ.ends_at.slice(0, 5)}
-                            </span>
-                            <span style={{ fontSize: 14, fontWeight: 600, textDecoration: cancelled ? 'line-through' : 'none' }}>
-                              {occ.title}
-                            </span>
-                            {child && (
-                              <span style={{ fontSize: 11, color: child.color, fontWeight: 600 }}>{child.display_name}</span>
+                    return (
+                      <div key={occ.id}
+                        draggable={isAdmin}
+                        onDragStart={() => { dragOccRef.current = occ.id; setDragOccId(occ.id) }}
+                        onDragEnd={() => { setDragOccId(null); setDragOverDate(null); dragOccRef.current = null }}
+                        style={{
+                          borderRadius: 'var(--r-md)', background: 'var(--color-surface)',
+                          border: '1px solid var(--color-border)', overflow: 'hidden',
+                          opacity: dragOccId === occ.id ? 0.4 : cancelled ? 0.5 : 1,
+                          cursor: isAdmin ? 'grab' : 'default',
+                          transition: 'opacity 0.15s',
+                        }}
+                      >
+                        {/* Occurrence header */}
+                        <div style={{ display: 'flex', alignItems: 'stretch', borderLeft: `3px solid ${child?.color ?? 'var(--color-border)'}` }}>
+                          <div style={{ padding: '10px 12px', flex: 1, minWidth: 0 }}>
+                            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: 12, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--color-muted)' }}>
+                                {occ.starts_at.slice(0, 5)}–{occ.ends_at.slice(0, 5)}
+                              </span>
+                              <span style={{ fontSize: 14, fontWeight: 600, textDecoration: cancelled ? 'line-through' : 'none' }}>
+                                {occ.title}
+                              </span>
+                              {child && (
+                                <span style={{ fontSize: 11, color: child.color, fontWeight: 600 }}>{child.display_name}</span>
+                              )}
+                              {occ.is_override && !cancelled && (
+                                <span title="Manuálisan módosított" style={{ fontSize: 11, color: 'var(--color-yellow)' }}>✏️</span>
+                              )}
+                            </div>
+                            {occ.custom_location_text ? (
+                              <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2 }}>📍 {occ.custom_location_text}</div>
+                            ) : loc && !loc.is_home && (
+                              <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2 }}>📍 {loc.name}</div>
                             )}
-                            {occ.is_override && !cancelled && (
-                              <span title="Manuálisan módosított" style={{ fontSize: 11, color: 'var(--color-yellow)' }}>✏️</span>
+                            {cancelled && (
+                              <div style={{ fontSize: 11, color: 'var(--color-yellow)', marginTop: 3, fontWeight: 600 }}>🚫 ELMARAD</div>
+                            )}
+                            {occ.note && !cancelled && (
+                              <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2, fontStyle: 'italic' }}>{occ.note}</div>
                             )}
                           </div>
-                          {occ.custom_location_text ? (
-                            <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2 }}>📍 {occ.custom_location_text}</div>
-                          ) : loc && !loc.is_home && (
-                            <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2 }}>📍 {loc.name}</div>
-                          )}
-                          {cancelled && (
-                            <div style={{ fontSize: 11, color: 'var(--color-yellow)', marginTop: 3, fontWeight: 600 }}>🚫 ELMARAD</div>
-                          )}
-                          {occ.note && !cancelled && (
-                            <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2, fontStyle: 'italic' }}>{occ.note}</div>
+                          {isAdmin && (
+                            <button
+                              onClick={e => { e.stopPropagation(); setSelectedOcc(occ) }}
+                              style={{
+                                padding: '10px 12px', background: 'none', border: 'none',
+                                cursor: 'pointer', color: 'var(--color-muted)',
+                                fontSize: 18, lineHeight: 1, alignSelf: 'flex-start',
+                              }}
+                              title="Módosítás / Lemondás"
+                            >⋯</button>
                           )}
                         </div>
-                        {/* ••• gomb */}
-                        {isAdmin && (
-                          <button
-                            onClick={() => setSelectedOcc(occ)}
-                            style={{
-                              padding: '10px 12px', background: 'none', border: 'none',
-                              cursor: 'pointer', color: 'var(--color-muted)',
-                              fontSize: 18, lineHeight: 1, alignSelf: 'flex-start',
-                            }}
-                            title="Módosítás / Lemondás"
-                          >⋯</button>
+
+                        {/* Transport legs */}
+                        {(dropoff || pickup) && !cancelled && (
+                          <div style={{
+                            borderTop: '1px solid var(--color-border)',
+                            padding: '7px 12px',
+                            display: 'flex', flexDirection: 'column', gap: 5,
+                          }}>
+                            {sortLegs(occ.legs).map(leg => {
+                              const transfer = transferMap.get(leg.id)
+                              return ({ leg, transfer })
+                            }).map(({ leg, transfer }) => {
+                              const driver   = personById(leg!.driver_id)
+                              const noDriver = !leg!.driver_id && !leg!.self_transport
+                              return (
+                                <div key={leg!.id} style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                  <DirectionBadge direction={leg!.direction} size={12} />
+                                  {noDriver ? (
+                                    <span style={{
+                                      color: 'var(--color-red)', fontWeight: 600, fontSize: 11,
+                                      background: 'rgba(242,107,107,0.1)', padding: '2px 7px',
+                                      borderRadius: 100, border: '1px solid rgba(242,107,107,0.25)',
+                                    }}>? Nincs vezető</span>
+                                  ) : (
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--color-muted-2)' }}>
+                                      <span style={{
+                                        width: 14, height: 14, borderRadius: '50%', background: driver?.color,
+                                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                        fontSize: 7, color: '#fff', fontWeight: 700, flexShrink: 0,
+                                      }}>{driver?.display_name[0]}</span>
+                                      {driver?.display_name}
+                                    </span>
+                                  )}
+                                  {transfer && (
+                                    <span style={{
+                                      fontSize: 10, fontWeight: 600,
+                                      color: 'var(--color-yellow)',
+                                      background: 'rgba(245,200,66,0.1)',
+                                      border: '1px solid rgba(245,200,66,0.25)',
+                                      borderRadius: 4, padding: '1px 6px', flexShrink: 0,
+                                    }}>
+                                      ⚡ <DirectionBadge direction={transfer.pairedDir as LegDirection} size={11} /> {transfer.pairedOccTitle}
+                                    </span>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
                         )}
                       </div>
-
-                      {/* Transport legs */}
-                      {(dropoff || pickup) && !cancelled && (
-                        <div style={{
-                          borderTop: '1px solid var(--color-border)',
-                          padding: '7px 12px',
-                          display: 'flex', flexDirection: 'column', gap: 5,
-                        }}>
-                          {sortLegs(occ.legs).map(leg => {
-                            const transfer = transferMap.get(leg.id)
-                            return ({ leg, transfer })
-                          }).map(({ leg, transfer }) => {
-                            const driver   = personById(leg!.driver_id)
-                            const noDriver = !leg!.driver_id && !leg!.self_transport
-                            return (
-                              <div key={leg!.id} style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                                <DirectionBadge direction={leg!.direction} size={12} />
-                                {noDriver ? (
-                                  <span style={{
-                                    color: 'var(--color-red)', fontWeight: 600, fontSize: 11,
-                                    background: 'rgba(242,107,107,0.1)', padding: '2px 7px',
-                                    borderRadius: 100, border: '1px solid rgba(242,107,107,0.25)',
-                                  }}>? Nincs vezető</span>
-                                ) : (
-                                  <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--color-muted-2)' }}>
-                                    <span style={{
-                                      width: 14, height: 14, borderRadius: '50%', background: driver?.color,
-                                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                                      fontSize: 7, color: '#fff', fontWeight: 700, flexShrink: 0,
-                                    }}>{driver?.display_name[0]}</span>
-                                    {driver?.display_name}
-                                  </span>
-                                )}
-                                {transfer && (
-                                  <span style={{
-                                    fontSize: 10, fontWeight: 600,
-                                    color: 'var(--color-yellow)',
-                                    background: 'rgba(245,200,66,0.1)',
-                                    border: '1px solid rgba(245,200,66,0.25)',
-                                    borderRadius: 4, padding: '1px 6px', flexShrink: 0,
-                                  }}>
-                                    ⚡ <DirectionBadge direction={transfer.pairedDir as LegDirection} size={11} /> {transfer.pairedOccTitle}
-                                  </span>
-                                )}
-                              </div>
-                            )
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
+                    )
+                  })}
+                </div>
               </div>
+            )
+          })}
+
+          {/* Drag hint — show days with 0 items as drop targets when dragging */}
+          {isDragging && (
+            <div style={{ marginTop: 8 }}>
+              {grouped.filter(g => g.items.length === 0).map(g => {
+                const isDropTarget = dragOverDate === g.dateStr
+                return (
+                  <div key={g.dateStr}
+                    onDragOver={e => { e.preventDefault(); setDragOverDate(g.dateStr) }}
+                    onDragLeave={() => setDragOverDate(null)}
+                    onDrop={() => handleDrop(g.dateStr)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8,
+                      padding: '10px 12px', borderRadius: 'var(--r-md)',
+                      border: `2px dashed ${isDropTarget ? 'rgba(79,156,249,0.7)' : 'rgba(79,156,249,0.2)'}`,
+                      background: isDropTarget ? 'rgba(79,156,249,0.08)' : 'transparent',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    <div style={{
+                      width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 13, fontWeight: 700,
+                      background: g.isToday ? 'var(--color-blue)' : 'var(--color-surface-2)',
+                      color: g.isToday ? '#fff' : 'var(--color-muted)',
+                    }}>{g.dayNum}</div>
+                    <div style={{ fontSize: 12, color: 'var(--color-muted)', textTransform: 'capitalize' }}>{g.label}</div>
+                    {isDropTarget && (
+                      <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--color-blue)', fontWeight: 600 }}>↓ ide</span>
+                    )}
+                  </div>
+                )
+              })}
             </div>
-          ))}
+          )}
         </div>
       )}
 
