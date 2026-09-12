@@ -30,22 +30,15 @@ self.addEventListener('fetch', (event) => {
 
 
 // ── Push kézbesítés mérés helper ────────────────────────────────────────
-async function getSupabaseUrl() {
-  try {
-    const cache = await caches.open('app-config')
-    const resp  = await cache.match('/sw-config')
-    if (!resp) return ''
-    const data = await resp.json()
-    return data.supabaseUrl || ''
-  } catch (_) { return '' }
-}
+// supabase_url a push payloadból jön (notify-custom injektálja)
+let _supabaseUrl = ''
 
-async function reportPushReceipt(logId, eventType) {
+async function reportPushReceipt(logId, eventType, supabaseUrl) {
   if (!logId) return
+  const url = supabaseUrl || _supabaseUrl
+  if (!url) return
   try {
-    const supabaseUrl = await getSupabaseUrl()
-    if (!supabaseUrl) return
-    await fetch(`${supabaseUrl}/functions/v1/push-receipt`, {
+    await fetch(`${url}/functions/v1/push-receipt`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ log_id: logId, event: eventType, user_agent: self.navigator?.userAgent }),
@@ -58,20 +51,22 @@ self.addEventListener('push', (event) => {
   let data = {}
   try { data = event.data?.json() ?? {} } catch { data = { title: 'Fuvar értesítés' } }
 
-  const title   = data.title   ?? 'Fuvar értesítés'
-  const logId = data.log_id ?? null
+  const title       = data.title       ?? 'Fuvar értesítés'
+  const logId       = data.log_id      ?? null
+  const supabaseUrl = data.supabase_url ?? ''
+  if (supabaseUrl) _supabaseUrl = supabaseUrl  // megjegyezzük a következő click-hez
   const options = {
     body:    data.body    ?? '',
     icon:    '/pwa-192x192.png',
     badge:   '/pwa-192x192.png',
     vibrate: [200, 100, 200],
-    data:    { url: data.url ?? '/fuvartabla', log_id: logId },
+    data:    { url: data.url ?? '/?inbox=1', log_id: logId, supabase_url: supabaseUrl },
     actions: [{ action: 'open', title: 'Megnyitás' }],
   }
 
   event.waitUntil(
     self.registration.showNotification(title, options).then(() => {
-      return reportPushReceipt(logId, 'delivered')
+      return reportPushReceipt(logId, 'delivered', supabaseUrl)
     })
   )
 })
@@ -81,10 +76,11 @@ self.addEventListener('notificationclick', (event) => {
   event.notification.close()
   const url = event.notification.data?.url ?? '/?inbox=1'
 
-  const logId = event.notification.data?.log_id ?? null
+  const logId       = event.notification.data?.log_id       ?? null
+  const supabaseUrl = event.notification.data?.supabase_url ?? ''
   event.waitUntil(
     Promise.all([
-      reportPushReceipt(logId, 'clicked'),
+      reportPushReceipt(logId, 'clicked', supabaseUrl),
       clients.matchAll({ type: 'window', includeUncontrolled: true }).then((wins) => {
         for (const w of wins) {
           if ('focus' in w) { w.navigate?.(url); return w.focus() }

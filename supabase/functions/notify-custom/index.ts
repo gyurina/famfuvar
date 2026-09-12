@@ -186,7 +186,7 @@ Deno.serve(async (req: Request) => {
     .single()
   const logId = logRow?.id ?? null
 
-  const notifPayload = JSON.stringify({ title, body: body ?? '', url: '/?inbox=1', log_id: logId })
+  const notifPayload = JSON.stringify({ title, body: body ?? '', url: '/?inbox=1', log_id: logId, supabase_url: supabaseUrl })
 
   const results = await Promise.allSettled(
     subs.map(async (sub) => {
