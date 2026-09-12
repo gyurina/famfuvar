@@ -1,11 +1,5 @@
 // Família Fuvar — Service Worker
 
-// ── Config fogadása a main thread-től ───────────────────────────────────
-self.addEventListener('message', (event) => {
-  if (event.data?.type === 'CONFIG') {
-    self.__SUPABASE_URL__ = event.data.supabaseUrl || ''
-  }
-})
 // Push értesítések + offline shell cache
 
 const CACHE = 'fuvar-v1'
@@ -36,15 +30,25 @@ self.addEventListener('fetch', (event) => {
 
 
 // ── Push kézbesítés mérés helper ────────────────────────────────────────
+async function getSupabaseUrl() {
+  try {
+    const cache = await caches.open('app-config')
+    const resp  = await cache.match('/sw-config')
+    if (!resp) return ''
+    const data = await resp.json()
+    return data.supabaseUrl || ''
+  } catch (_) { return '' }
+}
+
 async function reportPushReceipt(logId, eventType) {
   if (!logId) return
   try {
-    const supabaseUrl = self.__SUPABASE_URL__ || ''
+    const supabaseUrl = await getSupabaseUrl()
     if (!supabaseUrl) return
     await fetch(`${supabaseUrl}/functions/v1/push-receipt`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ log_id: logId, event: eventType, user_agent: navigator.userAgent }),
+      body: JSON.stringify({ log_id: logId, event: eventType, user_agent: self.navigator?.userAgent }),
     })
   } catch (_) { /* best-effort */ }
 }

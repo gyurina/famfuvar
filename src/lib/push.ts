@@ -3,7 +3,20 @@
 
 import { supabase } from './supabase'
 
-const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY as string | undefined
+const VAPID_PUBLIC_KEY  = import.meta.env.VITE_VAPID_PUBLIC_KEY  as string | undefined
+const SUPABASE_URL      = import.meta.env.VITE_SUPABASE_URL        as string | undefined
+
+/** SUPABASE_URL elmentése Cache API-ba (SW is el tudja olvasni) */
+async function saveConfigToCache() {
+  if (!SUPABASE_URL || !('caches' in window)) return
+  try {
+    const cache = await caches.open('app-config')
+    await cache.put('/sw-config', new Response(
+      JSON.stringify({ supabaseUrl: SUPABASE_URL }),
+      { headers: { 'Content-Type': 'application/json' } }
+    ))
+  } catch (_) { /* best-effort */ }
+}
 
 function urlBase64ToUint8Array(base64: string): Uint8Array {
   const padding = '='.repeat((4 - (base64.length % 4)) % 4)
@@ -42,6 +55,7 @@ export async function subscribeToPush(householdId: string): Promise<boolean> {
     return false
   }
 
+  saveConfigToCache().catch(() => {})
   const reg = await navigator.serviceWorker.ready
 
   // Ha már fel van iratkozva, csak szinkronizáljuk a DB-vel
