@@ -36,7 +36,7 @@ type DisplayItem =
 
 export function Fuvartabla() {
   const { person } = useAuth()
-  const { isAdmin, canAssignOthers, canSelfAssign, canEditOccurrence, isFilteredView } = useRole()
+  const { isAdmin, canAssignOthers, canSelfAssign, canEditOccurrence, canReleaseOwn, isFilteredView } = useRole()
   const { drivers, householdId, personById, locationById, locations, travelTimes } = useHousehold()
   const online = useOnlineStatus()
   const [weekOffset, setWeekOffset] = useState(0)
@@ -245,6 +245,7 @@ export function Fuvartabla() {
           canAssign={canAssignOthers}
           canClaim={canSelfAssign && !canAssignOthers}
           canEdit={canEditOccurrence}
+          canRelease={canReleaseOwn}
           drivers={drivers}
           blocks={blocksForRide(leg, legs, drivers, extEvents)}
           householdNames={householdNames}
@@ -303,6 +304,7 @@ export function Fuvartabla() {
           drivers={drivers}
           canAssign={canAssignOthers}
           canClaim={canSelfAssign && !canAssignOthers}
+          canRelease={canReleaseOwn}
           householdNames={householdNames}
           durationMins={duration}
           viewerId={myId}

@@ -24,6 +24,7 @@ export interface GroupedRideCardProps {
   drivers: Person[]
   canAssign: boolean
   canClaim: boolean
+  canRelease?: boolean
   householdNames?: string[]
   durationMins?: number | null
   viewerId?: string | null
@@ -44,6 +45,7 @@ export function GroupedRideCard({
   drivers,
   canAssign,
   canClaim,
+  canRelease = false,
   householdNames = [],
   durationMins = null,
   viewerId = null,
@@ -68,6 +70,7 @@ export function GroupedRideCard({
   const showRow = mode === 'assign' && (state === 'open')
   const showClaim = mode === 'claim' && state === 'open'
   const isOwn = !!viewerId && (driverId === viewerId || companionIds.includes(viewerId))
+  const showCantTake = !canAssign && canRelease && isOwn
   const who = childList(stops.map(s => accusative(s.child)))
   const assignedTitle = driver
     ? (stops.every(s => s.direction === 'inbound')
@@ -193,7 +196,7 @@ export function GroupedRideCard({
                   <Icon name="dots-three" size={20} />
                 </button>
               )}
-              {!canAssign && canClaim && isOwn && (
+              {!canAssign && showCantTake && (
                 <button type="button" className="ride-card-swap is-muted" onClick={onRelease}>
                   {copy.rides.cantTake}
                 </button>

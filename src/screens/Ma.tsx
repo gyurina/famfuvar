@@ -26,7 +26,7 @@ type LegWithOcc = RideRow & { occurrence: Occurrence }
 
 export function Ma() {
   const { person } = useAuth()
-  const { canAssignOthers, canSelfAssign, canEditOccurrence } = useRole()
+  const { canAssignOthers, canSelfAssign, canEditOccurrence, canReleaseOwn } = useRole()
   const { personById, locationById, householdId, persons, drivers } = useHousehold()
   const [showBreak,    setShowBreak]    = useState(false)
   const [breakPersonId,setBreakPersonId]= useState<string | undefined>(undefined)
@@ -277,6 +277,7 @@ export function Ma() {
                       canAssign={canAssignOthers}
                       canClaim={canSelfAssign && !canAssignOthers}
                       canEdit={canEditOccurrence}
+                      canRelease={canReleaseOwn}
                       drivers={drivers}
                       blocks={blocksForRide(leg, allLegs, drivers, [])}
                       householdNames={householdNames}

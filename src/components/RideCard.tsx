@@ -26,6 +26,7 @@ export interface RideCardProps {
   canAssign: boolean
   canClaim: boolean
   canEdit: boolean
+  canRelease?: boolean
   drivers: Person[]
   blocks: Record<string, DriverBlock>
   householdNames?: string[]
@@ -51,6 +52,7 @@ export function RideCard({
   canAssign,
   canClaim,
   canEdit,
+  canRelease = false,
   drivers,
   blocks,
   householdNames = [],
@@ -78,7 +80,7 @@ export function RideCard({
   const showRow = mode === 'assign' && (state === 'open' || editing)
   const showClaim = mode === 'claim' && state === 'open'
   const isOwn = !!viewerId && (ride.driver_id === viewerId || companions.includes(viewerId) || ride.self_transport)
-  const showCantTake = !canAssign && canClaim && (state === 'assigned' || state === 'self') && isOwn
+  const showCantTake = !canAssign && canRelease && (state === 'assigned' || state === 'self') && isOwn
   const pairedSameDriver = pairedRide
     && ride.driver_id
     && pairedRide.driver_id === ride.driver_id
