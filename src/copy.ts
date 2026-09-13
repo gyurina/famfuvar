@@ -170,6 +170,7 @@ export const copy = {
     conflict: 'ütközés',
     calendar: 'Naptár',
     absence: 'Szünet',
+    claim: 'Vállalom',
     returnAlso: 'Be is gyűjti',
     transitAlso: 'A kapcsolódó fuvart is ő vigye',
     transitHint: (time: string, title: string) =>

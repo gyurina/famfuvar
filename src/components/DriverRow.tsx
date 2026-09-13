@@ -1,5 +1,6 @@
-import { Avatar, type AvatarBadge } from './Avatar'
+import { Avatar, type DriverBlock } from './Avatar'
 import { Icon } from './Icon'
+import { copy } from '../copy'
 import type { Person } from '../types'
 
 export type Block = { kind: 'ride' | 'calendar' | 'break'; at?: string }
@@ -14,19 +15,25 @@ interface DriverRowProps {
   onPick: (id: string) => void
   onSelf?: () => void
   selfLabel?: string
-  /** assign = szülő (teljes arcsor), claim = nagyszülő (egy „Vállalom" gomb), read = mindenki más */
+  /** assign = szülő (teljes arcsor), claim = nagyszülő (egy gomb), read = mindenki más */
   mode: 'assign' | 'claim' | 'read'
   claimLabel?: string
   onClaim?: () => void
 }
 
-const blockBadge: Record<Block['kind'], AvatarBadge> = { ride: 'ride', calendar: 'calendar', break: 'break' }
+function toAvatarBlock(b: Block): DriverBlock {
+  if (b.kind === 'calendar') return { kind: 'calendar', label: b.at ?? copy.rides.calendar }
+  if (b.kind === 'break') return { kind: 'absence', label: b.at ?? copy.rides.absence }
+  return { kind: 'ride', label: b.at ?? copy.rides.conflict }
+}
+
 const blockLabel = (b: Block) =>
-  b.kind === 'ride' ? (b.at ?? 'Ütközés') : b.kind === 'calendar' ? 'Naptár' : 'Szünet'
+  b.kind === 'ride' ? (b.at ?? copy.rides.conflict) : b.kind === 'calendar' ? copy.rides.calendar : copy.rides.absence
 
 export function DriverRow({
   drivers, driverId, companions = [], selfTransport = false,
-  size = 46, blocks = {}, onPick, onSelf, selfLabel = 'Önállóan', mode, claimLabel = 'Vállalom', onClaim,
+  size = 46, blocks = {}, onPick, onSelf, selfLabel = copy.status.self, mode,
+  claimLabel = copy.rides.claim, onClaim,
 }: DriverRowProps) {
   if (mode === 'claim') {
     return (
@@ -52,31 +59,45 @@ export function DriverRow({
         const active = driverId === d.id
         const isCompanion = companions.includes(d.id)
         return (
-          <div key={d.id} style={{ flex: '1 0 0', minWidth: size, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+          <button
+            key={d.id}
+            type="button"
+            onClick={mode === 'assign' ? () => onPick(d.id) : undefined}
+            style={{
+              flex: '1 0 0', minWidth: size, display: 'flex', flexDirection: 'column',
+              alignItems: 'center', gap: 6, background: 'none', border: 'none', padding: 0,
+              cursor: mode === 'assign' ? 'pointer' : 'default',
+              opacity: block && !active ? 0.45 : 1,
+            }}
+          >
             <Avatar
               person={d}
               size={size}
-              active={active || isCompanion}
-              badge={block ? blockBadge[block.kind] : null}
-              dimmed={!!block && !active}
-              onClick={mode === 'assign' ? () => onPick(d.id) : undefined}
-              label={d.display_name}
+              block={block ? toAvatarBlock(block) : undefined}
             />
             <span style={{
               fontSize: 12, textAlign: 'center',
-              color: active ? 'var(--color-accent-ink)' : block ? 'var(--color-muted)' : 'var(--color-text-2)',
+              color: active || isCompanion ? 'var(--color-accent-ink)' : block ? 'var(--color-muted)' : 'var(--color-text-2)',
               fontWeight: active ? 600 : 500,
             }}>
               {block && !active ? blockLabel(block) : d.display_name}
             </span>
-          </div>
+          </button>
         )
       })}
       {onSelf && (
-        <div style={{ flex: '1 0 0', minWidth: size, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-          <Avatar self size={size} onClick={onSelf} />
+        <button
+          type="button"
+          onClick={onSelf}
+          style={{
+            flex: '1 0 0', minWidth: size, display: 'flex', flexDirection: 'column',
+            alignItems: 'center', gap: 6, background: 'none', border: 'none', padding: 0,
+            cursor: 'pointer',
+          }}
+        >
+          <Avatar variant="self" size={size} />
           <span style={{ fontSize: 12, color: selfTransport ? 'var(--color-accent-ink)' : 'var(--color-muted)', fontWeight: selfTransport ? 600 : 500 }}>{selfLabel}</span>
-        </div>
+        </button>
       )}
     </div>
   )

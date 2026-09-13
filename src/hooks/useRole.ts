@@ -4,7 +4,7 @@ import type { PersonRole } from '../types'
 /**
  * Role-based permissions
  * parent      → admin (full access)
- * grandparent → limited (own driver assignment only), de gazdátlan fuvart vállalhat
+ * grandparent → limited (own driver assignment only); can claim an open ride
  * babysitter  → drive-only, filtered view (only their assigned legs)
  * child       → read-only, no edit
  */

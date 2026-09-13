@@ -3,10 +3,6 @@ import { Header } from '../components/Header'
 import { supabase } from '../lib/supabase'
 import { useHousehold } from '../hooks/useHousehold'
 import { useAuth } from '../lib/auth'
-import { useRole } from '../hooks/useRole'
-import { useAssignDriver } from '../hooks/useAssignDriver'
-import { DriverRow } from '../components/DriverRow'
-import { Icon } from '../components/Icon'
 import type { TransportLeg, Occurrence } from '../types'
 import { BreakModal } from '../components/BreakModal'
 import { QuickLogModal } from '../components/QuickLogModal'
@@ -20,15 +16,13 @@ type LegWithOcc = TransportLeg & { occurrence: Occurrence; companion_id?: string
 
 export function Ma() {
   const { person } = useAuth()
-  const { personById, locationById, householdId, persons, drivers } = useHousehold()
-  const { isAdmin, isGrandparent, isBabysitter } = useRole()
+  const { personById, locationById, householdId, persons } = useHousehold()
   const [showBreak,    setShowBreak]    = useState(false)
   const [breakPersonId,setBreakPersonId]= useState<string | undefined>(undefined)
   const [showQuickLog, setShowQuickLog] = useState(false)
   const [reloadKey,    setReloadKey]    = useState(0)
   const [allLegs, setAllLegs] = useState<LegWithOcc[]>([])
   const [loading, setLoading] = useState(true)
-  const [openIndex, setOpenIndex] = useState(0)
 
   const today        = toIsoDate(new Date())
   const todayDisplay = formatDayLong(new Date())
@@ -60,9 +54,7 @@ export function Ma() {
   const orphanLegs = allLegs.filter(l =>
     !l.driver_id && !l.self_transport && l.occurrence?.status !== 'cancelled'
   )
-  const openLeg    = orphanLegs.length > 0
-    ? orphanLegs[Math.min(openIndex, orphanLegs.length - 1)]
-    : null
+  const hasIssue   = orphanLegs.length > 0
 
   return (
     <div style={{ background: 'var(--color-bg)', minHeight: '100dvh' }}>
