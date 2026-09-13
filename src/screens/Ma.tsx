@@ -71,7 +71,7 @@ export function Ma() {
       )}
 
       {!loading && (
-        <div style={{ padding: '20px 16px 96px' }}>
+        <div style={{ padding: '20px 16px calc(var(--nav-height) + 40px)' }}>
 
           {/* ── Saját napod ── */}
           <div className="section-label">A te napod</div>

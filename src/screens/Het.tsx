@@ -160,7 +160,7 @@ export function Het() {
       {/* Mini week strip */}
       <div style={{ display: 'flex', padding: '10px 16px 10px', gap: 4, borderBottom: '1px solid var(--color-border)' }}>
         {grouped.map(g => (
-          <div key={g.dateStr} style={{ flex: 1, textAlign: 'center' }}>
+          <div key={g.dateStr} style={{ flex: '1 1 0%', minWidth: 0, textAlign: 'center' }}>
             <div style={{ fontSize: 10, color: 'var(--color-muted)', marginBottom: 3 }}>
               {g.label.slice(0, 1).toUpperCase()}
             </div>
@@ -194,7 +194,7 @@ export function Het() {
 
       {/* ─── GRID VIEW ──────────────────────────────────────────────── */}
       {!loading && viewMode === 'grid' && (
-        <div style={{ overflowX: 'auto', paddingBottom: 96 }}>
+        <div style={{ overflowX: 'auto', paddingBottom: 'calc(var(--nav-height) + 40px)' }}>
           <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: 480, fontSize: 11 }}>
             <thead>
               <tr>
@@ -300,7 +300,7 @@ export function Het() {
 
       {/* ─── LIST VIEW ──────────────────────────────────────────────── */}
       {!loading && viewMode === 'list' && (
-        <div style={{ padding: '12px 16px 96px' }}>
+        <div style={{ padding: '12px 16px calc(var(--nav-height) + 40px)' }}>
           {grouped.map(g => {
             const isDropTarget = isDragging && dragOverDate === g.dateStr
             const showDay = g.items.length > 0 || isDropTarget

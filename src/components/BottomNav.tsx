@@ -23,7 +23,7 @@ export function BottomNav() {
           className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
         >
           <span className="nav-icon">{t.icon}</span>
-          <span>{t.label}</span>
+          <span className="nav-label">{t.label}</span>
         </NavLink>
       ))}
     </nav>

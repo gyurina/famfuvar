@@ -834,7 +834,7 @@ export function Beallitasok() {
         ))}
       </div>
 
-      <div style={{ padding: '16px 16px 80px' }}>
+      <div style={{ padding: '16px 16px calc(var(--nav-height) + 40px)' }}>
 
         {/* ══════════════════════════════════════
             HELYSZÍNEK
@@ -868,7 +868,7 @@ export function Beallitasok() {
                         onChange={e => setEditLocTbd(e.target.checked)} />
                       📍? TBD helyszín
                     </label>
-                    <div style={{ display: 'flex', gap: 8 }}>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       <button style={btnPrimary} disabled={locSaving} onClick={saveLoc}>
                         {locSaving ? '…' : 'Mentés'}
                       </button>
@@ -932,7 +932,7 @@ export function Beallitasok() {
                     onChange={e => setNewLocTbd(e.target.checked)} />
                   📍? TBD helyszín
                 </label>
-                <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <button style={btnPrimary} disabled={locSaving || !newLocName.trim()} onClick={addLoc}>
                     {locSaving ? '…' : 'Hozzáad'}
                   </button>
@@ -962,8 +962,8 @@ export function Beallitasok() {
                             background: '#450a0a', borderRadius: 8 }}>{ttError}</div>
             )}
 
-            <div style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid var(--color-border)' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <div style={{ borderRadius: 12, overflowX: 'auto', overflowY: 'hidden', border: '1px solid var(--color-border)' }}>
+              <table style={{ width: '100%', minWidth: 320, borderCollapse: 'collapse', fontSize: 13 }}>
                 <thead>
                   <tr style={{ background: 'var(--color-surface)',
                                 borderBottom: '1px solid var(--color-border)' }}>
@@ -1044,7 +1044,7 @@ export function Beallitasok() {
                 <input style={{ ...inp, width: 120 }} type="number" min={1}
                   value={newTTMin} onChange={e => setNewTTMin(e.target.value)}
                   placeholder="Percek" />
-                <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <button style={btnPrimary}
                     disabled={ttSaving || !newTTFrom || !newTTTo || !newTTMin}
                     onClick={addTT}>
@@ -1667,7 +1667,7 @@ export function Beallitasok() {
                     onChange={e => setNewBreakNote(e.target.value)} />
                 </div>
 
-                <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
                   <button style={btnPrimary} disabled={breakSaving} onClick={addBreakPeriod}>
                     {breakSaving ? '…' : '✓ Mentés'}
                   </button>
