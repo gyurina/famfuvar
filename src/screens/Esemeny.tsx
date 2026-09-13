@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
-import { format, parseISO } from 'date-fns'
-import { hu } from 'date-fns/locale'
 import { Header } from '../components/Header'
 import { supabase } from '../lib/supabase'
 import { useHousehold } from '../hooks/useHousehold'
 import type { Occurrence } from '../types'
+import { copy } from '../copy'
+import { formatDayLong, toIsoDate } from '../lib/format'
+import { Icon } from '../components/Icon'
 
 export function Esemeny() {
   const { children, locations, home, householdId, personById, locationById } = useHousehold()
@@ -14,7 +15,7 @@ export function Esemeny() {
   const [saving, setSaving] = useState(false)
   const [editingEvent, setEditingEvent] = useState<Occurrence | null>(null)
 
-  const today = format(new Date(), 'yyyy-MM-dd')
+  const today = toIsoDate(new Date())
 
   // Form state
   const [fDate,     setFDate]     = useState(today)
@@ -185,7 +186,7 @@ export function Esemeny() {
   for (const e of events) {
     let g = grouped.find(x => x.date === e.on_date)
     if (!g) {
-      g = { date: e.on_date, label: format(parseISO(e.on_date), 'EEEE, MMM d.', { locale: hu }), evts: [] }
+      g = { date: e.on_date, label: formatDayLong(e.on_date), evts: [] }
       grouped.push(g)
     }
     g.evts.push(e)
@@ -206,13 +207,13 @@ export function Esemeny() {
 
   return (
     <div style={{ background: 'var(--color-bg)', minHeight: '100dvh' }}>
-      <Header title="Események" subtitle="Egyszeri programok" />
+      <Header title={copy.events.title} subtitle={copy.events.subtitle} />
 
       {!loading && events.length === 0 && !showForm && (
         <div className="empty-state" style={{ marginTop: 48 }}>
-          <div className="icon">🎯</div>
-          <div className="title">Nincs egyszeri esemény</div>
-          <div className="sub">Nyomj + a hozzáadáshoz</div>
+          <div className="icon"><Icon name="target" size={40} weight="thin" color="#3a5670" /></div>
+          <div className="title">{copy.events.emptyOneOff}</div>
+          <div className="sub">{copy.events.emptySub}</div>
         </div>
       )}
 
@@ -253,7 +254,7 @@ export function Esemeny() {
                         color: e.status === 'cancelled' ? 'var(--color-muted)' : 'var(--color-blue)',
                         border: `1px solid ${e.status === 'cancelled' ? 'var(--color-border)' : 'rgba(79,156,249,0.25)'}`,
                       }}>
-                        {e.status === 'cancelled' ? 'Elmarad' : '✎ Szerkeszt'}
+                        {e.status === 'cancelled' ? copy.status.cancelled : copy.events.editBadge}
                       </div>
                     </div>
                   </div>
@@ -268,15 +269,16 @@ export function Esemeny() {
       {!showForm && (
         <button
           onClick={() => openForm()}
+          aria-label={copy.a11y.addEvent}
           style={{
-            position: 'fixed', bottom: 80, right: 20, zIndex: 50,
+            position: 'fixed', bottom: 'calc(72px + env(safe-area-inset-bottom, 0) + 12px)', right: 20, zIndex: 50,
             width: 52, height: 52, borderRadius: '50%',
             background: 'var(--color-blue)', color: '#fff',
-            border: 'none', fontSize: 26, cursor: 'pointer',
+            border: 'none', cursor: 'pointer',
             boxShadow: '0 4px 16px rgba(79,156,249,0.45)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}
-        >+</button>
+        ><Icon name="plus" size={26} weight="bold" /></button>
       )}
 
       {/* Bottom sheet form */}
@@ -294,27 +296,28 @@ export function Esemeny() {
           }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
               <div style={{ fontSize: 16, fontWeight: 700 }}>
-                {editingEvent ? 'Esemény szerkesztése' : 'Új esemény'}
+                {editingEvent ? copy.events.edit : copy.events.add}
               </div>
-              <button onClick={closeForm}
-                style={{ background: 'none', border: 'none', color: 'var(--color-muted)', fontSize: 22, cursor: 'pointer', lineHeight: 1 }}>
-                ✕
+              <button onClick={closeForm} aria-label={copy.a11y.close}
+                style={{ background: 'none', border: 'none', color: 'var(--color-muted)', cursor: 'pointer',
+                  width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="x" size={22} />
               </button>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div>
-                <label style={labelStyle}>Program neve</label>
-                <input style={inputStyle} value={fTitle} onChange={e => setFTitle(e.target.value)} placeholder="pl. Zeneiskola" />
+                <label style={labelStyle}>{copy.form.programName}</label>
+                <input style={inputStyle} value={fTitle} onChange={e => setFTitle(e.target.value)} placeholder={copy.form.placeholderProgram} />
               </div>
 
               <div>
-                <label style={labelStyle}>Dátum</label>
+                <label style={labelStyle}>{copy.form.date}</label>
                 <input type="date" style={inputStyle} value={fDate} onChange={e => setFDate(e.target.value)} />
               </div>
 
               <div>
-                <label style={labelStyle}>Kinek</label>
+                <label style={labelStyle}>{copy.form.who}</label>
                 <select style={inputStyle} value={fPersonId} onChange={e => setFPersonId(e.target.value)}>
                   {children.map(c => <option key={c.id} value={c.id}>{c.display_name}</option>)}
                 </select>
@@ -322,42 +325,43 @@ export function Esemeny() {
 
               <div style={{ display: 'flex', gap: 12 }}>
                 <div style={{ flex: 1 }}>
-                  <label style={labelStyle}>Kezdés</label>
+                  <label style={labelStyle}>{copy.form.start}</label>
                   <input type="time" style={inputStyle} value={fStartsAt} onChange={e => setFStartsAt(e.target.value)} />
                 </div>
                 <div style={{ flex: 1 }}>
-                  <label style={labelStyle}>Vége</label>
+                  <label style={labelStyle}>{copy.form.end}</label>
                   <input type="time" style={inputStyle} value={fEndsAt} onChange={e => setFEndsAt(e.target.value)} />
                 </div>
               </div>
 
               <div>
-                <label style={labelStyle}>Helyszín</label>
+                <label style={labelStyle}>{copy.form.location}</label>
                 <select style={inputStyle} value={fLocId} onChange={e => setFLocId(e.target.value)}>
-                  <option value="">— Nincs megadva —</option>
+                  <option value="">{copy.form.notSet}</option>
                   {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
                 </select>
               </div>
 
               <div>
-                <label style={labelStyle}>Szállítás</label>
+                <label style={labelStyle}>{copy.form.transport}</label>
                 <div style={{ display: 'flex', gap: 8 }}>
                   {[
-                    { label: 'Odavitel', value: fDropoff, set: setFDropoff },
-                    { label: 'Visszahozás', value: fPickup, set: setFPickup },
+                    { label: copy.events.outbound, value: fDropoff, set: setFDropoff },
+                    { label: copy.events.inbound, value: fPickup, set: setFPickup },
                   ].map(({ label, value, set }) => (
                     <button
                       key={label}
                       onClick={() => set(v => !v)}
                       style={{
                         flex: 1, padding: '9px 0', borderRadius: 'var(--r-sm)',
-                        fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                        fontSize: 12, fontWeight: 600, cursor: 'pointer', minHeight: 44,
                         background: value ? 'rgba(79,156,249,0.12)' : 'var(--color-surface-2)',
                         color: value ? 'var(--color-blue)' : 'var(--color-muted)',
                         border: `1px solid ${value ? 'rgba(79,156,249,0.3)' : 'var(--color-border)'}`,
                         transition: 'all 0.15s',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                       }}
-                    >{value ? '✓ ' : ''}{label}</button>
+                    >{value ? <Icon name="check" size={14} weight="bold" /> : null}{label}</button>
                   ))}
                 </div>
               </div>
@@ -371,7 +375,7 @@ export function Esemeny() {
                   color: '#fff', border: 'none', fontWeight: 700, fontSize: 15,
                   cursor: saving || !fTitle || !fPersonId ? 'default' : 'pointer',
                 }}
-              >{saving ? 'Mentés…' : editingEvent ? 'Módosítás mentése' : 'Esemény hozzáadása'}</button>
+              >{saving ? copy.common.saving : editingEvent ? copy.events.saveEdit : copy.events.addSubmit}</button>
 
               {/* Cancel event button — only in edit mode */}
               {editingEvent && editingEvent.status !== 'cancelled' && (
@@ -384,7 +388,7 @@ export function Esemeny() {
                     color: 'var(--color-red)', border: '1px solid rgba(242,107,107,0.3)',
                     fontWeight: 600, fontSize: 14, cursor: 'pointer',
                   }}
-                >⊘ Esemény elmarad</button>
+                >{copy.events.cancelEvent}</button>
               )}
             </div>
           </div>

@@ -3,40 +3,71 @@
    ═══════════════════════════════════════════════════ */
 
 :root {
-  /* Színek */
-  --color-bg:        #07101e;
-  --color-surface:   #0d1b2e;
-  --color-surface-2: #142033;
-  --color-border:    #1c2e42;
-  --color-border-2:  #243447;
-  --color-text:      #e8f0f8;
-  --color-muted:     #5a7a96;
-  --color-muted-2:   #8aabb8;
+  /* Színek — spec 2. doksi 4. szakasz */
+  --color-bg:          #07101e;
+  --color-surface:     #101d2e;
+  --color-surface-2:   #16273b;
+  --color-border:      #22364d;
+  --color-border-2:    #2b4159;
+  --color-text:        #e8f0f8;
+  --color-text-2:      #a8c2d4;
+  --color-muted:       #7d99ae;
+  --color-muted-2:     var(--color-text-2);
 
-  --color-blue:      #4f9cf9;
-  --color-blue-dim:  #0e2a4a;
-  --color-green:     #2dd88a;
-  --color-green-dim: #0b2e1e;
-  --color-yellow:    #f5c842;
-  --color-red:       #f26b6b;
-  --color-red-dim:   #2d0a0a;
+  --color-accent:      #4f9cf9;
+  --color-accent-ink:  #79b4ff;
+  --color-danger:      #f26b6b;
+  --color-warn:        #f5c842;
+  --color-ok:          #2dd88a;
 
-  /* Alias (screens use these) */
+  /* Régi nevek aliasban — a screenek ne törjenek */
+  --color-blue:        var(--color-accent);
+  --color-blue-dim:    #0e2a4a;
+  --color-green:       var(--color-ok);
+  --color-green-dim:   #0b2e1e;
+  --color-yellow:      var(--color-warn);
+  --color-red:         var(--color-danger);
+  --color-red-dim:     #2d0a0a;
+
   --bg:      var(--color-bg);
   --surface: var(--color-surface);
   --border:  var(--color-border);
   --text:    var(--color-text);
   --muted:   var(--color-muted);
-  --blue:    var(--color-blue);
-  --green:   var(--color-green);
-  --yellow:  var(--color-yellow);
-  --red:     var(--color-red);
+  --blue:    var(--color-accent);
+  --green:   var(--color-ok);
+  --yellow:  var(--color-warn);
+  --red:     var(--color-danger);
+
+  /* Típus */
+  --t-1: 28px;
+  --t-2: 21px;
+  --t-3: 17px;
+  --t-4: 16px;
+  --t-5: 14px;
+  --t-6: 13.5px;
+  --t-7: 12px;
+
+  /* Tér */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
 
   /* Sugarak */
   --r-sm:  8px;
-  --r-md:  14px;
+  --r-md:  16px;
   --r-lg:  18px;
-  --r-xl:  24px;
+  --r-xl:  22px;
+  --r-pill: 100px;
+
+  /* Mozgás */
+  --ease-out: ease-out;
+  --dur-state: 150ms;
+  --dur-sheet: 220ms;
 
   /* Árnyékok */
   --shadow-card: 0 2px 12px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04);
@@ -59,6 +90,23 @@ body {
 button, [role="button"] { cursor: pointer; font-family: inherit; }
 input, select, textarea { font-family: inherit; }
 a { color: inherit; text-decoration: none; }
+
+:focus { outline: none; }
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.tabular { font-variant-numeric: tabular-nums; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+}
 
 /* ── Kártyák ────────────────────────────────────── */
 .card {
@@ -89,16 +137,17 @@ a { color: inherit; text-decoration: none; }
 }
 
 .header-title {
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: -0.5px;
+  font-size: var(--t-1);
+  font-weight: 600;
+  letter-spacing: -0.02em;
   color: var(--color-text);
-  line-height: 1.2;
+  line-height: 1.15;
 }
 
 .header-subtitle {
-  font-size: 13px;
-  color: var(--color-muted);
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--color-text-2);
   margin-top: 1px;
 }
 
@@ -108,15 +157,14 @@ a { color: inherit; text-decoration: none; }
   bottom: 0;
   left: 0;
   right: 0;
-  height: calc(56px + env(safe-area-inset-bottom, 0));
+  height: calc(72px + env(safe-area-inset-bottom, 0));
   padding-bottom: env(safe-area-inset-bottom, 0);
-  background: rgba(7, 16, 30, 0.85);
+  background: rgba(9, 19, 33, 0.92);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border-top: 1px solid var(--color-border);
   display: flex;
-  align-items: flex-start;
-  padding-top: 4px;
+  align-items: stretch;
   z-index: 50;
 }
 
@@ -125,30 +173,30 @@ a { color: inherit; text-decoration: none; }
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 3px;
-  padding: 6px 4px;
+  justify-content: center;
+  gap: 4px;
+  min-height: 44px;
+  padding: 0 4px;
   border: none;
   background: none;
   color: var(--color-muted);
-  font-size: 10px;
+  font-size: var(--t-7);
   font-weight: 500;
   letter-spacing: 0.02em;
-  transition: color 0.18s;
+  transition: color var(--dur-state) var(--ease-out);
   -webkit-tap-highlight-color: transparent;
 }
 
 .nav-item.active {
-  color: var(--color-blue);
+  color: var(--color-accent-ink);
+  font-weight: 600;
 }
 
 .nav-item .nav-icon {
-  font-size: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   line-height: 1;
-  transition: transform 0.18s;
-}
-
-.nav-item.active .nav-icon {
-  transform: scale(1.12);
 }
 
 /* ── Leg kártya ──────────────────────────────────── */
@@ -380,14 +428,84 @@ a { color: inherit; text-decoration: none; }
   text-align: center;
 }
 
-.empty-state .icon { font-size: 48px; opacity: 0.6; }
-.empty-state .title { font-size: 15px; font-weight: 600; color: var(--color-text); }
-.empty-state .sub   { font-size: 13px; color: var(--color-muted); }
+.empty-state .icon { font-size: 48px; opacity: 0.6; color: #3a5670; }
+.empty-state .title { font-size: var(--t-4); font-weight: 600; color: var(--color-text); }
+.empty-state .sub   { font-size: var(--t-6); color: var(--color-text-2); }
+
+/* ── Avatar (C6) ─────────────────────────────────── */
+.avatar {
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 600;
+  flex-shrink: 0;
+  position: relative;
+  line-height: 1;
+  user-select: none;
+}
+.avatar.size-26 { width: 26px; height: 26px; font-size: 11px; }
+.avatar.size-34 { width: 34px; height: 34px; font-size: 13px; }
+.avatar.size-46 { width: 46px; height: 46px; font-size: 17px; }
+.avatar.size-52 { width: 52px; height: 52px; font-size: 19px; }
+.avatar.self {
+  background: transparent;
+  border: 1px dashed #3a5670;
+  color: var(--color-text-2);
+}
+.avatar-badge {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--color-bg);
+}
+.avatar.size-52 .avatar-badge { width: 18px; height: 18px; }
+
+/* ── Pill (C8) ───────────────────────────────────── */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--r-pill);
+  font-size: 13px;
+  font-weight: 600;
+  width: fit-content;
+  min-height: 32px;
+}
+.pill.accent {
+  background: rgba(79, 156, 249, 0.14);
+  border: 1px solid rgba(79, 156, 249, 0.30);
+  color: var(--color-accent-ink);
+}
+.pill.ok {
+  background: rgba(45, 216, 138, 0.12);
+  border: 1px solid rgba(45, 216, 138, 0.28);
+  color: #4ce3a0;
+}
+.pill.warn {
+  background: rgba(245, 200, 66, 0.10);
+  border: 1px solid rgba(245, 200, 66, 0.28);
+  color: var(--color-warn);
+  font-weight: 500;
+}
+.pill.danger {
+  background: rgba(242, 107, 107, 0.12);
+  border: 1px solid rgba(242, 107, 107, 0.35);
+  color: #f4908f;
+}
 
 /* ── Week nav gomb ───────────────────────────────── */
 .week-nav-btn {
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
   border-radius: var(--r-sm);
   border: 1px solid var(--color-border);
   background: var(--color-surface-2);
@@ -396,38 +514,38 @@ a { color: inherit; text-decoration: none; }
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.15s;
+  transition: background var(--dur-state) var(--ease-out);
 }
 .week-nav-btn:hover { background: var(--color-border); }
 
 .week-nav-today {
-  height: 36px;
-  padding: 0 12px;
-  border-radius: var(--r-sm);
-  border: 1px solid var(--color-border);
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--color-border-2);
   background: var(--color-surface-2);
-  color: var(--color-muted-2);
-  font-size: 12px;
+  color: var(--color-text-2);
+  font-size: 13px;
   font-weight: 600;
   display: flex;
   align-items: center;
-  transition: background 0.15s;
+  transition: background var(--dur-state) var(--ease-out);
 }
 .week-nav-today:hover { background: var(--color-border); }
 
-/* ── Gomb fogaskerék ─────────────────────────────── */
+/* ── Ikon gomb ───────────────────────────────────── */
 .icon-btn {
-  width: 36px;
-  height: 36px;
-  border-radius: var(--r-sm);
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
   border: 1px solid var(--color-border);
   background: var(--color-surface-2);
-  color: var(--color-muted);
+  color: var(--color-text-2);
   font-size: 15px;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.15s, color 0.15s;
+  transition: background var(--dur-state) var(--ease-out), color var(--dur-state) var(--ease-out);
   flex-shrink: 0;
 }
 .icon-btn:hover { background: var(--color-border); color: var(--color-text); }

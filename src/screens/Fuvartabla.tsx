@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
-import { format, addDays, startOfDay } from 'date-fns'
-import { hu } from 'date-fns/locale'
+import { addDays, startOfDay } from 'date-fns'
 import { Header } from '../components/Header'
 import { supabase } from '../lib/supabase'
 import { useHousehold } from '../hooks/useHousehold'
@@ -15,6 +14,9 @@ import { useOnlineStatus } from '../hooks/useOnlineStatus'
 import { fetchGoogleCalendars, fetchExternalEvents } from '../lib/googleCalendar'
 import { queueAssignDriver } from '../lib/sync'
 import { db } from '../lib/db'
+import { copy } from '../copy'
+import { formatTime, formatWeekRange, formatDayLong, toIsoDate } from '../lib/format'
+import { Icon } from '../components/Icon'
 
 type LegRow = TransportLeg & {
   occurrence: Occurrence
@@ -412,7 +414,7 @@ export function Fuvartabla() {
   const seenOccIds = new Set<string>()
 
   const grouped = days.map(d => {
-    let dayLegs = visLegs.filter(l => l.depart_at.startsWith(format(d, 'yyyy-MM-dd')))
+    let dayLegs = visLegs.filter(l => l.depart_at.startsWith(toIsoDate(d)))
     if (filter === 'mine' && myId) {
       dayLegs = dayLegs.filter(l =>
         l.driver_id === myId || l.companion_id === myId || l.companion2_id === myId
@@ -431,7 +433,7 @@ export function Fuvartabla() {
       }
     }
     items.sort((a, b) => a.sortKey.localeCompare(b.sortKey))
-    return { date: d, label: format(d, 'EEEE, MMM d.', { locale: hu }), items }
+    return { date: d, label: formatDayLong(d), items }
   })
 
   function crewLabel(leg: LegRow) {
@@ -458,7 +460,7 @@ export function Fuvartabla() {
       (leg.direction === 'dropoff' && t.to_location === locId) ||
       (leg.direction === 'pickup'  && t.from_location === locId)
     )
-    return tt ? `~${tt.minutes} perc` : null
+    return tt ? copy.rides.travelMins(tt.minutes) : null
   }
 
   function isTbdLocation(locId: string | null): boolean {
@@ -505,7 +507,7 @@ export function Fuvartabla() {
                 background: isSelected ? 'var(--color-blue)' : 'transparent',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 fontSize: 11, color: '#fff', transition: 'all 0.12s',
-              }}>{isSelected ? '✓' : ''}</div>
+              }}>{isSelected ? <Icon name="check" size={12} weight="bold" color="#fff" /> : null}</div>
             </div>
           )}
           <div className="leg-card-stripe" style={{ background: stripe }} />
@@ -513,18 +515,18 @@ export function Fuvartabla() {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
-                  {format(new Date(leg.depart_at), 'HH:mm')}
+                  {formatTime(leg.depart_at)}
                 </span>
                 {(() => { const h = travelTimeHint(leg); return h ? <span style={{ fontSize: 10, color: 'var(--color-muted)', fontVariantNumeric: 'tabular-nums' }}>({h})</span> : null })()}
                 {(isTbdLocation(leg.to_location) || isTbdLocation(leg.from_location)) && (
-                  <span title="Helyszín nincs megadva!" style={{ fontSize: 10, fontWeight: 700, color: 'var(--color-yellow)', background: 'rgba(245,200,66,0.12)', border: '1px solid rgba(245,200,66,0.3)', borderRadius: 4, padding: '1px 5px' }}>📍?</span>
+                  <span title={copy.settings.tbdLocation} style={{ fontSize: 10, fontWeight: 700, color: 'var(--color-yellow)', background: 'rgba(245,200,66,0.12)', border: '1px solid rgba(245,200,66,0.3)', borderRadius: 4, padding: '1px 5px' }}>{copy.status.locationMissing}</span>
                 )}
                 <span style={{ fontSize: 13 }}>
                   <DirectionBadge direction={leg.direction} /> {occ?.title ?? '?'}
                 </span>
-                {child && <span style={{ fontSize: 11, color: child.color, fontWeight: 600 }}>({child.display_name})</span>}
+                {child && <span style={{ fontSize: 11, color: 'var(--color-text-2)', fontWeight: 600 }}>({child.display_name})</span>}
                 {occ?.is_override && occ.status !== 'cancelled' && (
-                  <span title="Módosított" style={{ fontSize: 11 }}>✏️</span>
+                  <span title={copy.status.modified}><Icon name="pencil" size={12} /></span>
                 )}
                 {(() => {
                   if (!occ || seenOccIds.has(occ.id)) return null
@@ -533,8 +535,9 @@ export function Fuvartabla() {
                     <button
                       onClick={e => { e.stopPropagation(); setSelectedOcc(occ as Occurrence) }}
                       style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-muted)', fontSize: 16, padding: '0 4px', lineHeight: 1 }}
-                      title="Módosítás / Lemondás"
-                    >⋯</button>
+                      title={copy.week.editCancel}
+                      aria-label={copy.a11y.moreActions}
+                    ><Icon name="dots-three" size={18} /></button>
                   ) : null
                 })()}
               </div>
@@ -545,7 +548,7 @@ export function Fuvartabla() {
               )}
               {hasTransit && (
                 <div style={{ fontSize: 10, color: 'var(--color-yellow)', marginTop: 2 }}>
-                  ⚡ Átszállítás: {(() => { const t = transitLeg(leg.id); return t ? `${format(new Date(t.depart_at), 'HH:mm')} ${t.direction === 'dropoff' ? '→' : '←'} ${t.occurrence?.title}` : '' })()}
+                  {copy.rides.transfer}: {(() => { const t = transitLeg(leg.id); return t ? `${formatTime(t.depart_at)} ${t.occurrence?.title}` : '' })()}
                 </div>
               )}
             </div>
@@ -558,7 +561,7 @@ export function Fuvartabla() {
                 style={{ opacity: occ?.status === 'cancelled' ? 0.6 : 1 }}
               >
                 {!leg.self_transport && driver && <div className="driver-avatar" style={{ background: driver.color }}>{driver.display_name[0]}</div>}
-                <span>{leg.self_transport ? '🚶 Önállóan' : isOrphan ? '? Nincs' : crewLabel(leg)}</span>
+                <span>{leg.self_transport ? copy.status.self : isOrphan ? copy.status.noDriver : crewLabel(leg)}</span>
               </button>
             )}
           </div>
@@ -569,7 +572,7 @@ export function Fuvartabla() {
           <div className="picker-panel" style={{ borderRadius: '0 0 var(--r-md) var(--r-md)', border: '1px solid var(--color-border)', borderTop: 'none' }}>
             {pickerStep === 'driver' ? (
               <>
-                <div className="picker-label">Ki vezet?</div>
+                <div className="picker-label">{copy.rides.pickDriver}</div>
                 {hasTransit && (() => {
                   const t = transitLeg(leg.id)!
                   return (
@@ -578,19 +581,18 @@ export function Fuvartabla() {
                       background: 'rgba(245,200,66,0.08)', border: '1px solid rgba(245,200,66,0.25)',
                       fontSize: 11, color: 'var(--color-yellow)',
                     }}>
-                      ⚡ <strong>Átszállítás</strong> — {format(new Date(t.depart_at), 'HH:mm')} <DirectionBadge direction={t.direction} /> {t.occurrence?.title}.
-                      Ha ugyanaz a sofőr viszi, közvetlenül mehet tovább.
+                      {copy.rides.transitHint(formatTime(t.depart_at), t.occurrence?.title ?? '')}
                     </div>
                   )
                 })()}
                 <div className="picker-grid">
                   <button className="picker-btn self-btn" onClick={() => doAssign(leg.id, null, null, null, false, true)} disabled={assigning}>
-                    <span style={{ fontSize: 18 }}>🚶</span>
-                    <span style={{ fontSize: 11 }}>Önállóan</span>
+                    <Icon name="person-simple-walk" size={18} />
+                    <span style={{ fontSize: 11 }}>{copy.status.self}</span>
                   </button>
                   <button className="picker-btn none-btn" onClick={() => pickDriver(leg.id, null)}>
-                    <span style={{ color: 'var(--color-red)' }}>⊘</span>
-                    Gazdátlan hagyás
+                    <Icon name="prohibit" size={16} color="var(--color-danger)" />
+                    {copy.rides.leaveOpen}
                   </button>
                   {visibleDrivers.map(d => {
                     const conflict  = hasConflict(d.id, leg)
@@ -606,10 +608,10 @@ export function Fuvartabla() {
                         <div className="driver-avatar" style={{ background: d.color }}>{d.display_name[0]}</div>
                         <span style={{ flex: 1 }}>{d.display_name}</span>
                         {conflict && (
-                          <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--color-red)', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 4, padding: '1px 5px', flexShrink: 0 }}>⚠ ütközés</span>
+                          <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--color-red)', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 4, padding: '1px 5px', flexShrink: 0 }}>{copy.rides.conflict}</span>
                         )}
                         {!conflict && gConflict && (
-                          <span style={{ fontSize: 10, fontWeight: 600, color: '#fbbf24', background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.25)', borderRadius: 4, padding: '1px 5px', flexShrink: 0 }}>📅 Google</span>
+                          <span style={{ fontSize: 10, fontWeight: 600, color: '#fbbf24', background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.25)', borderRadius: 4, padding: '1px 5px', flexShrink: 0 }}>{copy.rides.calendar}</span>
                         )}
                       </button>
                     )
@@ -623,9 +625,9 @@ export function Fuvartabla() {
                     onClick={() => { setPickerStep('driver'); setPendingDriverId(null); setSelectedCompanions([]); setReturnAlso(false); setTransitAlso(false) }}
                     style={{ background: 'none', border: 'none', color: 'var(--color-muted)', cursor: 'pointer', fontSize: 18, padding: 0, lineHeight: 1 }}
                   >←</button>
-                  Ki megy még?
+                  {copy.rides.whoElse}
                   <span style={{ color: 'var(--color-muted-2)', fontWeight: 500, textTransform: 'none', letterSpacing: 0, fontSize: 11 }}>
-                    (max 2 · {personById(pendingDriverId)?.display_name} vezet)
+                    {copy.rides.maxCompanions(personById(pendingDriverId)?.display_name ?? '')}
                   </span>
                 </div>
                 <div className="picker-grid">
@@ -638,7 +640,7 @@ export function Fuvartabla() {
                         style={{ opacity: maxed ? 0.4 : 1 }}>
                         <div className="driver-avatar" style={{ background: d.color }}>{d.display_name[0]}</div>
                         {d.display_name}
-                        {sel && <span style={{ marginLeft: 'auto', color: 'var(--color-blue)', fontSize: 14 }}>✓</span>}
+                        {sel && <span style={{ marginLeft: 'auto', color: 'var(--color-blue)', display: 'inline-flex' }}><Icon name="check" size={14} weight="bold" /></span>}
                       </button>
                     )
                   })}
@@ -656,9 +658,9 @@ export function Fuvartabla() {
                       width: 18, height: 18, borderRadius: 4, flexShrink: 0,
                       background: returnAlso ? 'var(--color-green)' : 'var(--color-border)',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: 11, color: returnAlso ? '#000' : 'transparent', transition: 'all 0.15s',
-                    }}>✓</span>
-                    Visszahozza is — ugyanez a csapat
+                      fontSize: 11, transition: 'all 0.15s',
+                    }}>{returnAlso ? <Icon name="check" size={12} weight="bold" color="#000" /> : null}</span>
+                    {copy.rides.returnAlso}
                   </button>
                 )}
                 {hasTransit && (() => {
@@ -676,11 +678,11 @@ export function Fuvartabla() {
                         width: 18, height: 18, borderRadius: 4, flexShrink: 0,
                         background: transitAlso ? 'var(--color-yellow)' : 'var(--color-border)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 11, color: transitAlso ? '#000' : 'transparent', transition: 'all 0.15s',
-                      }}>✓</span>
-                      ⚡ Az átszállítást is ő vigye
+                        fontSize: 11, transition: 'all 0.15s',
+                      }}>{transitAlso ? <Icon name="check" size={12} weight="bold" color="#000" /> : null}</span>
+                      {copy.rides.transitAlso}
                       <span style={{ fontSize: 10, color: 'var(--color-muted)', fontWeight: 400, marginLeft: 2 }}>
-                        ({format(new Date(t.depart_at), 'HH:mm')} <DirectionBadge direction={t.direction} /> {t.occurrence?.title})
+                        ({formatTime(t.depart_at)} <DirectionBadge direction={t.direction} /> {t.occurrence?.title})
                       </span>
                     </button>
                   )
@@ -691,7 +693,7 @@ export function Fuvartabla() {
                     background: 'rgba(79,156,249,0.12)', color: 'var(--color-blue)',
                     border: '1px solid rgba(79,156,249,0.3)', fontWeight: 600,
                   }}>
-                    {assigning ? 'Mentés…' : selectedCompanions.length === 0 ? 'Egyedül megy ✓' : `Kész (${1 + selectedCompanions.length} fő) ✓`}
+                    {assigning ? copy.common.saving : selectedCompanions.length === 0 ? copy.rides.aloneOk : copy.rides.readyCount(1 + selectedCompanions.length)}
                   </button>
                 </div>
               </>
@@ -724,13 +726,13 @@ export function Fuvartabla() {
             <div className="leg-card-body" style={{ flex: 1 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-blue)', letterSpacing: 0.3 }}>🔗 Körút</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-blue)', letterSpacing: 0.3 }}>{copy.rides.grouped}</span>
                   <span style={{ fontSize: 11, color: 'var(--color-muted)' }}>
-                    {format(new Date(tripLegs[0].depart_at), 'HH:mm')}
-                    {tripLegs.length > 1 && ` – ${format(new Date(tripLegs[tripLegs.length - 1].depart_at), 'HH:mm')}`}
+                    {formatTime(tripLegs[0].depart_at)}
+                    {tripLegs.length > 1 && ` – ${formatTime(tripLegs[tripLegs.length - 1].depart_at)}`}
                   </span>
                   <span style={{ fontSize: 11, color: 'var(--color-muted)' }}>·</span>
-                  <span style={{ fontSize: 11, color: 'var(--color-muted)' }}>{tripLegs.length} láb</span>
+                  <span style={{ fontSize: 11, color: 'var(--color-muted)' }}>{copy.rides.groupedCount(tripLegs.length)}</span>
                 </div>
                 {/* Leg list */}
                 <div style={{ marginTop: 4 }}>
@@ -739,10 +741,10 @@ export function Fuvartabla() {
                     return (
                       <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, marginTop: 1 }}>
                         <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--color-muted)' }}>
-                          {format(new Date(l.depart_at), 'HH:mm')}
+                          {formatTime(l.depart_at)}
                         </span>
                         <span><DirectionBadge direction={l.direction} /> {l.occurrence?.title ?? '?'}</span>
-                        {child && <span style={{ color: child.color, fontWeight: 600 }}>({child.display_name})</span>}
+                        {child && <span style={{ color: 'var(--color-text-2)', fontWeight: 600 }}>({child.display_name})</span>}
                       </div>
                     )
                   })}
@@ -755,7 +757,7 @@ export function Fuvartabla() {
                   style={{ whiteSpace: 'nowrap' }}
                 >
                   {!rep?.self_transport && repDriver && <div className="driver-avatar" style={{ background: repDriver.color }}>{repDriver.display_name[0]}</div>}
-                  <span>{rep?.self_transport ? '🚶 Önállóan' : isOrphan ? '? Nincs' : crewLabel(rep!)}</span>
+                  <span>{rep?.self_transport ? copy.status.self : isOrphan ? copy.status.noDriver : crewLabel(rep!)}</span>
                 </button>
                 <button
                   onClick={() => handleSplit(tripId, tripLegs)}
@@ -765,7 +767,7 @@ export function Fuvartabla() {
                     color: 'var(--color-muted)', fontWeight: 600,
                   }}
                 >
-                  Szétválaszt
+                  {copy.rides.split}
                 </button>
               </div>
             </div>
@@ -777,11 +779,11 @@ export function Fuvartabla() {
           <div className="picker-panel" style={{ borderRadius: '0 0 var(--r-md) var(--r-md)', border: '1px solid var(--color-border)', borderTop: 'none' }}>
             {tripPickerStep === 'driver' ? (
               <>
-                <div className="picker-label">Ki vezet a körúton?</div>
+                <div className="picker-label">{copy.rides.whoDrivesGrouped}</div>
                 <div className="picker-grid">
                   <button className="picker-btn none-btn" onClick={() => pickTripDriver(tripLegs, null)}>
-                    <span style={{ color: 'var(--color-red)' }}>⊘</span>
-                    Gazdátlan hagyás
+                    <Icon name="prohibit" size={16} color="var(--color-danger)" />
+                    {copy.rides.leaveOpen}
                   </button>
                   {visibleDrivers.map(d => {
                     const conflict  = hasTripConflict(d.id, tripLegs)
@@ -797,10 +799,10 @@ export function Fuvartabla() {
                         <div className="driver-avatar" style={{ background: d.color }}>{d.display_name[0]}</div>
                         <span style={{ flex: 1 }}>{d.display_name}</span>
                         {conflict && (
-                          <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--color-red)', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 4, padding: '1px 5px', flexShrink: 0 }}>⚠ ütközés</span>
+                          <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--color-red)', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 4, padding: '1px 5px', flexShrink: 0 }}>{copy.rides.conflict}</span>
                         )}
                         {!conflict && gConflict && (
-                          <span style={{ fontSize: 10, fontWeight: 600, color: '#fbbf24', background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.25)', borderRadius: 4, padding: '1px 5px', flexShrink: 0 }}>📅 Google</span>
+                          <span style={{ fontSize: 10, fontWeight: 600, color: '#fbbf24', background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.25)', borderRadius: 4, padding: '1px 5px', flexShrink: 0 }}>{copy.rides.calendar}</span>
                         )}
                       </button>
                     )
@@ -814,9 +816,9 @@ export function Fuvartabla() {
                     onClick={() => { setTripPickerStep('driver'); setTripPendingDriverId(null); setTripSelectedCompanions([]) }}
                     style={{ background: 'none', border: 'none', color: 'var(--color-muted)', cursor: 'pointer', fontSize: 18, padding: 0, lineHeight: 1 }}
                   >←</button>
-                  Ki megy még?
+                  {copy.rides.whoElse}
                   <span style={{ color: 'var(--color-muted-2)', fontWeight: 500, textTransform: 'none', letterSpacing: 0, fontSize: 11 }}>
-                    (max 2 · {personById(tripPendingDriverId)?.display_name} vezet)
+                    {copy.rides.maxCompanions(personById(tripPendingDriverId)?.display_name ?? '')}
                   </span>
                 </div>
                 <div className="picker-grid">
@@ -829,7 +831,7 @@ export function Fuvartabla() {
                         style={{ opacity: maxed ? 0.4 : 1 }}>
                         <div className="driver-avatar" style={{ background: d.color }}>{d.display_name[0]}</div>
                         {d.display_name}
-                        {sel && <span style={{ marginLeft: 'auto', color: 'var(--color-blue)', fontSize: 14 }}>✓</span>}
+                        {sel && <span style={{ marginLeft: 'auto', color: 'var(--color-blue)', display: 'inline-flex' }}><Icon name="check" size={14} weight="bold" /></span>}
                       </button>
                     )
                   })}
@@ -840,7 +842,7 @@ export function Fuvartabla() {
                     background: 'rgba(79,156,249,0.12)', color: 'var(--color-blue)',
                     border: '1px solid rgba(79,156,249,0.3)', fontWeight: 600,
                   }}>
-                    {tripAssigning ? 'Mentés…' : tripSelectedCompanions.length === 0 ? 'Egyedül megy ✓' : `Kész (${1 + tripSelectedCompanions.length} fő) ✓`}
+                    {tripAssigning ? copy.common.saving : tripSelectedCompanions.length === 0 ? copy.rides.aloneOk : copy.rides.readyCount(1 + tripSelectedCompanions.length)}
                   </button>
                 </div>
               </>
@@ -856,35 +858,40 @@ export function Fuvartabla() {
   return (
     <div style={{ background: 'var(--color-bg)', minHeight: '100dvh' }}>
       <Header
-        title="Fuvartábla"
-        subtitle={`${format(days[0], 'MMM d.', { locale: hu })} – ${format(days[6], 'MMM d.', { locale: hu })}`}
+        title={copy.rides.title}
+        subtitle={formatWeekRange(days[0], days[6])}
         action={
           <div style={{ display: 'flex', gap: 4 }}>
             <button
               className="week-nav-btn"
               onClick={toggleMergeMode}
-              title={mergeMode ? 'Kilépés az összevonás módból' : 'Lábak összevonása körúttá'}
+              title={mergeMode ? copy.rides.mergeExit : copy.rides.mergeStart}
+              aria-label={copy.a11y.merge}
               style={{
                 background: mergeMode ? 'rgba(79,156,249,0.15)' : undefined,
                 color: mergeMode ? 'var(--color-blue)' : undefined,
                 border: mergeMode ? '1px solid rgba(79,156,249,0.4)' : undefined,
               }}
-            >🔗</button>
-            <button className="week-nav-btn" onClick={() => setWeekOffset(o => o - 1)}>◀</button>
-            <button className="week-nav-today" onClick={() => setWeekOffset(0)}>Ma</button>
-            <button className="week-nav-btn" onClick={() => setWeekOffset(o => o + 1)}>▶</button>
+            ><Icon name="link" size={20} /></button>
+            <button className="week-nav-btn" onClick={() => setWeekOffset(o => o - 1)} aria-label={copy.a11y.prevWeek}>
+              <Icon name="caret-left" size={20} />
+            </button>
+            <button className="week-nav-today" onClick={() => setWeekOffset(0)}>{copy.common.today}</button>
+            <button className="week-nav-btn" onClick={() => setWeekOffset(o => o + 1)} aria-label={copy.a11y.nextWeek}>
+              <Icon name="caret-right" size={20} />
+            </button>
           </div>
         }
       />
 
       <div className={`status-banner ${bannerClass}`} style={{ margin: '12px 16px 0' }}>
         {loading
-          ? 'Betöltés…'
+          ? copy.common.loading
           : allAssigned
-            ? <><span>✓</span><span>Minden láb ki van osztva</span></>
+            ? <><Icon name="check" size={16} weight="fill" /><span>{copy.rides.allAssigned}</span></>
             : orphans.length > 0
-              ? <><span>⚠</span><span>{orphans.length} gazdátlan láb ezen a héten</span></>
-              : <span>Nincs fuvar ezen a héten</span>}
+              ? <><Icon name="warning" size={16} weight="fill" /><span>{copy.rides.openThisWeek(orphans.length)}</span></>
+              : <span>{copy.rides.emptyAll}</span>}
       </div>
 
       {/* Merge mode info banner */}
@@ -894,7 +901,7 @@ export function Fuvartabla() {
           background: 'rgba(79,156,249,0.08)', border: '1px solid rgba(79,156,249,0.25)',
           fontSize: 12, color: 'var(--color-blue)', fontWeight: 500,
         }}>
-          🔗 Válassz ki legalább 2 lábat a körúttá összevonáshoz
+          {copy.rides.mergeHint}
         </div>
       )}
 
@@ -908,7 +915,7 @@ export function Fuvartabla() {
             color: filter === f ? 'var(--color-blue)' : 'var(--color-muted)',
             cursor: 'pointer', transition: 'all 0.15s',
           }}>
-            {f === 'all' ? 'Összes' : 'Csak én'}
+            {f === 'all' ? copy.rides.filterAll : copy.rides.filterMine}
           </button>
         ))}
       </div>
@@ -917,10 +924,11 @@ export function Fuvartabla() {
         <div style={{ padding: '16px 16px 96px' }}>
           {grouped.every(g => g.items.length === 0) && (
             <div className="empty-state">
-              <div className="icon">📭</div>
+              <div className="icon"><Icon name="steering-wheel" size={40} weight="thin" color="#3a5670" /></div>
               <div className="title">
-                {filter === 'mine' ? 'Neked nincs fuvarod ezen a héten' : 'Nincs fuvar ezen a héten'}
+                {filter === 'mine' ? copy.rides.emptyMine : copy.empty.rides.title}
               </div>
+              <div className="sub">{copy.empty.rides.sub}</div>
             </div>
           )}
 
@@ -940,7 +948,7 @@ export function Fuvartabla() {
       {/* Merge action bar */}
       {mergeMode && (
         <div style={{
-          position: 'fixed', bottom: 'calc(56px + env(safe-area-inset-bottom, 0))', left: 0, right: 0,
+          position: 'fixed', bottom: 'calc(72px + env(safe-area-inset-bottom, 0))', left: 0, right: 0,
           padding: '12px 16px', paddingBottom: 'calc(12px + env(safe-area-inset-bottom))',
           background: 'var(--color-surface)', borderTop: '1px solid var(--color-border)',
           display: 'flex', gap: 8,
@@ -952,7 +960,7 @@ export function Fuvartabla() {
               background: 'var(--color-surface-2)', border: '1px solid var(--color-border)',
               color: 'var(--color-muted)', cursor: 'pointer',
             }}
-          >Mégsem</button>
+          >{copy.common.cancel}</button>
           <button
             onClick={handleMerge}
             disabled={selectedLegIds.size < 2 || merging}
@@ -963,7 +971,7 @@ export function Fuvartabla() {
               cursor: selectedLegIds.size >= 2 ? 'pointer' : 'not-allowed', transition: 'all 0.15s',
             }}
           >
-            {merging ? 'Összevonás…' : selectedLegIds.size < 2 ? `Összevon (${selectedLegIds.size} kijelölve)` : `🔗 Összevon (${selectedLegIds.size} láb)`}
+            {merging ? copy.rides.merging : selectedLegIds.size < 2 ? copy.rides.mergeSelected(selectedLegIds.size) : copy.rides.mergeN(selectedLegIds.size)}
           </button>
         </div>
       )}

@@ -26,3 +26,4 @@ dist-ssr
 .env
 supabase/.temp/
 .ssh/
+.worktrees/

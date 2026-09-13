@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { useHousehold } from '../hooks/useHousehold'
-import { format } from 'date-fns'
-import { hu } from 'date-fns/locale'
+import { copy } from '../copy'
+import { formatShortDate, formatTime } from '../lib/format'
+import { Icon } from './Icon'
 
 interface PushMessage {
   id: string
@@ -18,10 +19,9 @@ function getLastRead(): number {
   try { return parseInt(localStorage.getItem(LS_KEY) ?? '0', 10) } catch { return 0 }
 }
 function setLastRead(ts: number) {
-  try { localStorage.setItem(LS_KEY, String(ts)) } catch {}
+  try { localStorage.setItem(LS_KEY, String(ts)) } catch { /* ignore */ }
 }
 
-// ── Külső state: más komponensek megnyithatják az inboxot ──
 let _openInbox: (() => void) | null = null
 export function openPushInbox() { _openInbox?.() }
 
@@ -32,14 +32,12 @@ export function PushInbox() {
   const [loading, setLoading] = useState(false)
   const [unread, setUnread]   = useState(0)
 
-  // Regisztrálj a globális megnyitóba
   const doOpen = useCallback(() => setOpen(true), [])
   useEffect(() => {
     _openInbox = doOpen
     return () => { if (_openInbox === doOpen) _openInbox = null }
   }, [doOpen])
 
-  // URL-ből detektál: ?inbox=1 → automatikusan nyílik meg
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     if (params.get('inbox') === '1') {
@@ -48,7 +46,6 @@ export function PushInbox() {
     }
   }, [])
 
-  // Olvasatlan count lekérése (háttérben, mindig)
   useEffect(() => {
     if (!householdId) return
     const lastRead = getLastRead()
@@ -60,7 +57,6 @@ export function PushInbox() {
       .then(({ count }) => setUnread(count ?? 0))
   }, [householdId, open])
 
-  // Üzenetek betöltése megnyitáskor
   useEffect(() => {
     if (!open || !householdId) return
     setLoading(true)
@@ -80,18 +76,17 @@ export function PushInbox() {
 
   return (
     <>
-      {/* ── Harang gomb ── */}
       <button
         className="icon-btn"
         onClick={() => setOpen(true)}
-        aria-label="Üzenetek"
+        aria-label={copy.a11y.messages}
         style={{ position: 'relative' }}
       >
-        🔔
+        <Icon name="bell" size={24} />
         {unread > 0 && (
           <span style={{
             position: 'absolute', top: 0, right: 0,
-            background: 'var(--color-danger, #e74c3c)',
+            background: 'var(--color-danger)',
             color: '#fff', borderRadius: '50%',
             fontSize: 10, fontWeight: 700,
             width: 16, height: 16,
@@ -103,7 +98,6 @@ export function PushInbox() {
         )}
       </button>
 
-      {/* ── Bottom sheet overlay ── */}
       {open && (
         <div
           style={{
@@ -120,26 +114,26 @@ export function PushInbox() {
             display: 'flex', flexDirection: 'column',
             padding: '0 0 env(safe-area-inset-bottom, 16px)',
           }}>
-            {/* fejléc */}
             <div style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
               padding: '18px 20px 12px',
               borderBottom: '1px solid var(--color-border)',
             }}>
-              <div style={{ fontWeight: 700, fontSize: 16 }}>📬 Értesítések</div>
-              <button className="icon-btn" onClick={() => setOpen(false)}>✕</button>
+              <div style={{ fontWeight: 700, fontSize: 16 }}>{copy.inbox.title}</div>
+              <button className="icon-btn" onClick={() => setOpen(false)} aria-label={copy.a11y.close}>
+                <Icon name="x" size={18} />
+              </button>
             </div>
 
-            {/* lista */}
             <div style={{ overflowY: 'auto', flex: 1, padding: '12px 16px' }}>
               {loading && (
                 <div style={{ textAlign: 'center', color: 'var(--color-muted)', padding: 32 }}>
-                  Betöltés...
+                  {copy.common.loading}
                 </div>
               )}
               {!loading && msgs.length === 0 && (
                 <div style={{ textAlign: 'center', color: 'var(--color-muted)', padding: 32 }}>
-                  Még nincs értesítés
+                  {copy.inbox.emptySub}
                 </div>
               )}
               {msgs.map(m => (
@@ -148,7 +142,7 @@ export function PushInbox() {
                   borderRadius: 12,
                   padding: '12px 14px',
                   marginBottom: 10,
-                  borderLeft: '3px solid var(--color-primary)',
+                  borderLeft: '3px solid var(--color-accent)',
                 }}>
                   <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
                     {m.title}
@@ -159,8 +153,8 @@ export function PushInbox() {
                     </div>
                   )}
                   <div style={{ fontSize: 11, color: 'var(--color-muted)' }}>
-                    {format(new Date(m.sent_at), 'MM.dd. HH:mm', { locale: hu })}
-                    {m.sent_count > 0 && ` · ${m.sent_count} eszközre küldve`}
+                    {formatShortDate(m.sent_at)} {formatTime(m.sent_at)}
+                    {m.sent_count > 0 && ` · ${copy.inbox.sentTo(m.sent_count)}`}
                   </div>
                 </div>
               ))}

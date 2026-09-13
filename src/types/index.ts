@@ -41,6 +41,7 @@ export interface Person {
   household_id: string
   auth_user_id: string | null
   display_name: string
+  name_acc: string
   role: PersonRole
   can_drive: boolean
   color: string

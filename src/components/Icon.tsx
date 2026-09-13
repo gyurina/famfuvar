@@ -1,0 +1,107 @@
+import type { IconWeight, Icon as PhosphorIcon } from '@phosphor-icons/react'
+import {
+  ArrowsInSimple,
+  ArrowsSplit,
+  Bed,
+  Bell,
+  BellSlash,
+  CalendarBlank,
+  CalendarDots,
+  CalendarX,
+  CaretLeft,
+  CaretRight,
+  Check,
+  CheckCircle,
+  Clipboard,
+  CloudSlash,
+  Coffee,
+  DotsThree,
+  Eye,
+  FirstAid,
+  Funnel,
+  Gear,
+  HandWaving,
+  House,
+  HourglassMedium,
+  LinkSimple,
+  List,
+  MapPin,
+  NotePencil,
+  PaperPlaneTilt,
+  PencilSimple,
+  PersonSimpleWalk,
+  Plus,
+  Prohibit,
+  SignOut,
+  SquaresFour,
+  SteeringWheel,
+  Stethoscope,
+  SunHorizon,
+  Target,
+  Trash,
+  UsersThree,
+  Warning,
+  Wrench,
+  X,
+} from '@phosphor-icons/react'
+
+const ICONS = {
+  'arrows-in-simple': ArrowsInSimple,
+  'arrows-split': ArrowsSplit,
+  bed: Bed,
+  bell: Bell,
+  'bell-slash': BellSlash,
+  'calendar-blank': CalendarBlank,
+  'calendar-dots': CalendarDots,
+  'calendar-x': CalendarX,
+  'caret-left': CaretLeft,
+  'caret-right': CaretRight,
+  check: Check,
+  'check-circle': CheckCircle,
+  clipboard: Clipboard,
+  'cloud-slash': CloudSlash,
+  coffee: Coffee,
+  'dots-three': DotsThree,
+  eye: Eye,
+  'first-aid': FirstAid,
+  funnel: Funnel,
+  gear: Gear,
+  'hand-waving': HandWaving,
+  house: House,
+  'hourglass-medium': HourglassMedium,
+  link: LinkSimple,
+  list: List,
+  'map-pin': MapPin,
+  'note-pencil': NotePencil,
+  'paper-plane': PaperPlaneTilt,
+  pencil: PencilSimple,
+  'person-simple-walk': PersonSimpleWalk,
+  plus: Plus,
+  prohibit: Prohibit,
+  'sign-out': SignOut,
+  'squares-four': SquaresFour,
+  'steering-wheel': SteeringWheel,
+  stethoscope: Stethoscope,
+  'sun-horizon': SunHorizon,
+  target: Target,
+  trash: Trash,
+  'users-three': UsersThree,
+  warning: Warning,
+  wrench: Wrench,
+  x: X,
+} satisfies Record<string, PhosphorIcon>
+
+export type IconName = keyof typeof ICONS
+
+interface IconProps {
+  name: IconName
+  size?: number
+  weight?: IconWeight
+  color?: string
+  className?: string
+}
+
+export function Icon({ name, size = 24, weight = 'regular', color, className }: IconProps) {
+  const Cmp = ICONS[name]
+  return <Cmp size={size} weight={weight} color={color} className={className} />
+}

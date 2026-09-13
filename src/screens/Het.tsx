@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { format, startOfWeek, addDays, isToday } from 'date-fns'
-import { hu } from 'date-fns/locale'
+import { startOfWeek, addDays, isToday } from 'date-fns'
 import { Header } from '../components/Header'
 import { supabase } from '../lib/supabase'
 import { useHousehold } from '../hooks/useHousehold'
@@ -11,6 +10,9 @@ import { sortLegs } from '../lib/occurrences'
 import { useRole } from '../hooks/useRole'
 import { OccurrenceOverrideModal } from '../components/OccurrenceOverrideModal'
 import { db } from '../lib/db'
+import { copy } from '../copy'
+import { formatWeekRange, formatMonthDay, toIsoDate } from '../lib/format'
+import { Icon } from '../components/Icon'
 
 type OccWithLegs = Occurrence & { legs: TransportLeg[] }
 
@@ -37,8 +39,8 @@ export function Het() {
 
   useEffect(() => {
     if (!householdId) return
-    const from = format(days[0], 'yyyy-MM-dd')
-    const to   = format(addDays(days[6], 1), 'yyyy-MM-dd')
+    const from = toIsoDate(days[0])
+    const to   = toIsoDate(addDays(days[6], 1))
     setLoading(true)
 
     Promise.all([
@@ -129,10 +131,11 @@ export function Het() {
   }
 
   const grouped = days.map(d => {
-    const dateStr = format(d, 'yyyy-MM-dd')
+    const dateStr = toIsoDate(d)
     let dayItems  = items.filter(o => o.on_date === dateStr)
     if (hideCancelled) dayItems = dayItems.filter(o => o.status !== 'cancelled')
-    return { date: d, dateStr, isToday: isToday(d), label: format(d, 'EEEE', { locale: hu }), dayNum: format(d, 'd'), items: dayItems }
+    const wd = (d.getDay() + 6) % 7
+    return { date: d, dateStr, isToday: isToday(d), label: copy.weekday.long[wd], dayNum: String(d.getDate()), wd, items: dayItems }
   })
 
   const totalItems = grouped.reduce((s, g) => s + g.items.length, 0)
@@ -141,18 +144,22 @@ export function Het() {
   return (
     <div style={{ background: 'var(--color-bg)', minHeight: '100dvh' }}>
       <Header
-        title="Hét"
-        subtitle={`${format(days[0], 'MMM d.', { locale: hu })} – ${format(days[6], 'MMM d.', { locale: hu })}`}
+        title={copy.week.title}
+        subtitle={formatWeekRange(days[0], days[6])}
         action={
           <div style={{ display: 'flex', gap: 4 }}>
             <button className="week-nav-btn" onClick={() => setViewMode(m => m === 'list' ? 'grid' : 'list')}
-              title={viewMode === 'list' ? 'Rácsnézet' : 'Listanézet'}
-              style={{ fontFamily: 'monospace', fontWeight: 700 }}>
-              {viewMode === 'list' ? '⊞' : '☰'}
+              title={viewMode === 'list' ? copy.a11y.gridView : copy.a11y.listView}
+              aria-label={viewMode === 'list' ? copy.a11y.gridView : copy.a11y.listView}>
+              <Icon name={viewMode === 'list' ? 'squares-four' : 'list'} size={18} />
             </button>
-            <button className="week-nav-btn" onClick={() => setWeekOffset(o => o - 1)}>◀</button>
-            <button className="week-nav-today" onClick={() => setWeekOffset(0)}>Ma</button>
-            <button className="week-nav-btn" onClick={() => setWeekOffset(o => o + 1)}>▶</button>
+            <button className="week-nav-btn" onClick={() => setWeekOffset(o => o - 1)} aria-label={copy.a11y.prevWeek}>
+              <Icon name="caret-left" size={18} />
+            </button>
+            <button className="week-nav-today" onClick={() => setWeekOffset(0)}>{copy.common.today}</button>
+            <button className="week-nav-btn" onClick={() => setWeekOffset(o => o + 1)} aria-label={copy.a11y.nextWeek}>
+              <Icon name="caret-right" size={18} />
+            </button>
           </div>
         }
       />
@@ -162,7 +169,7 @@ export function Het() {
         {grouped.map(g => (
           <div key={g.dateStr} style={{ flex: 1, textAlign: 'center' }}>
             <div style={{ fontSize: 10, color: 'var(--color-muted)', marginBottom: 3 }}>
-              {g.label.slice(0, 1).toUpperCase()}
+              {copy.weekday.short[g.wd]}
             </div>
             <div style={{
               width: 26, height: 26, borderRadius: '50%', margin: '0 auto',
@@ -181,14 +188,14 @@ export function Het() {
       </div>
 
       {loading && (
-        <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--color-muted)', fontSize: 13 }}>Betöltés…</div>
+        <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--color-muted)', fontSize: 13 }}>{copy.common.loading}</div>
       )}
 
       {!loading && totalItems === 0 && !isDragging && (
         <div className="empty-state" style={{ marginTop: 32 }}>
-          <div className="icon">📅</div>
-          <div className="title">Nincs program ezen a héten</div>
-          <div className="sub">Futtasd a generate_horizon-t vagy adj hozzá egyszeri eseményt</div>
+          <div className="icon"><Icon name="calendar-blank" size={40} weight="thin" color="#3a5670" /></div>
+          <div className="title">{copy.empty.week.title}</div>
+          <div className="sub">{copy.empty.week.sub}</div>
         </div>
       )}
 
@@ -201,7 +208,7 @@ export function Het() {
                 <th style={{ padding: '6px 8px', textAlign: 'left', fontSize: 11,
                   color: 'var(--color-muted)', fontWeight: 600, background: 'var(--color-surface)',
                   position: 'sticky', left: 0, zIndex: 2, borderBottom: '1px solid var(--color-border)',
-                  minWidth: 70 }}>Személy</th>
+                  minWidth: 70 }}>{copy.week.person}</th>
                 {grouped.map(g => (
                   <th key={g.dateStr} style={{
                     padding: '6px 6px', textAlign: 'center', fontSize: 11, fontWeight: 600,
@@ -209,7 +216,7 @@ export function Het() {
                     color: g.isToday ? '#fff' : 'var(--color-muted)',
                     borderBottom: '1px solid var(--color-border)', minWidth: 80, maxWidth: 110,
                   }}>
-                    <div>{g.label.slice(0,1).toUpperCase() + g.label.slice(1,4)}</div>
+                    <div>{copy.weekday.mid[g.wd]}</div>
                     <div style={{ fontWeight: 400, opacity: 0.8 }}>{g.dayNum}</div>
                   </th>
                 ))}
@@ -276,7 +283,7 @@ export function Het() {
                                 {occ.starts_at.slice(0,5)}
                               </div>
                               {noDriver && !cancelled && (
-                                <div style={{ color: 'var(--color-red)', fontWeight: 700, fontSize: 9 }}>⚠ nincs sofőr</div>
+                                <div style={{ color: 'var(--color-red)', fontWeight: 700, fontSize: 9 }}>{copy.week.noDriver}</div>
                               )}
                             </div>
                           )
@@ -286,7 +293,7 @@ export function Het() {
                             height: 30, border: '2px dashed rgba(79,156,249,0.5)',
                             borderRadius: 5, display: 'flex', alignItems: 'center',
                             justifyContent: 'center', fontSize: 10, color: 'var(--color-blue)',
-                          }}>ide</div>
+                          }}>{copy.week.dropHere}</div>
                         )}
                       </td>
                     )
@@ -334,12 +341,12 @@ export function Het() {
                     {g.dayNum}
                   </div>
                   <div>
-                    <div style={{ fontSize: 13, fontWeight: 600, textTransform: 'capitalize' }}>{g.label}</div>
-                    <div style={{ fontSize: 11, color: 'var(--color-muted)' }}>{format(g.date, 'MMMM d.', { locale: hu })}</div>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{g.label}</div>
+                    <div style={{ fontSize: 11, color: 'var(--color-muted)' }}>{formatMonthDay(g.date)}</div>
                   </div>
                   {isDropTarget && (
                     <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--color-blue)', fontWeight: 600 }}>
-                      ↓ ide húzva
+                      {copy.week.dropHereHint}
                     </span>
                   )}
                 </div>
@@ -377,19 +384,23 @@ export function Het() {
                                 {occ.title}
                               </span>
                               {child && (
-                                <span style={{ fontSize: 11, color: child.color, fontWeight: 600 }}>{child.display_name}</span>
+                                <span style={{ fontSize: 11, color: 'var(--color-text-2)', fontWeight: 600 }}>{child.display_name}</span>
                               )}
                               {occ.is_override && !cancelled && (
-                                <span title="Manuálisan módosított" style={{ fontSize: 11, color: 'var(--color-yellow)' }}>✏️</span>
+                                <span title={copy.status.modified} aria-label={copy.status.modified} style={{ fontSize: 11, color: 'var(--color-yellow)', display: 'inline-flex' }}><Icon name="pencil" size={12} /></span>
                               )}
                             </div>
                             {occ.custom_location_text ? (
-                              <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2 }}>📍 {occ.custom_location_text}</div>
+                              <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <Icon name="map-pin" size={12} /> {occ.custom_location_text}
+                              </div>
                             ) : loc && !loc.is_home && (
-                              <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2 }}>📍 {loc.name}</div>
+                              <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <Icon name="map-pin" size={12} /> {loc.name}
+                              </div>
                             )}
                             {cancelled && (
-                              <div style={{ fontSize: 11, color: 'var(--color-yellow)', marginTop: 3, fontWeight: 600 }}>🚫 ELMARAD</div>
+                              <div style={{ fontSize: 11, color: 'var(--color-yellow)', marginTop: 3, fontWeight: 600 }}>{copy.status.cancelled}</div>
                             )}
                             {occ.note && !cancelled && (
                               <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2, fontStyle: 'italic' }}>{occ.note}</div>
@@ -403,8 +414,9 @@ export function Het() {
                                 cursor: 'pointer', color: 'var(--color-muted)',
                                 fontSize: 18, lineHeight: 1, alignSelf: 'flex-start',
                               }}
-                              title="Módosítás / Lemondás"
-                            >⋯</button>
+                              title={copy.week.editCancel}
+                              aria-label={copy.a11y.moreActions}
+                            ><Icon name="dots-three" size={18} /></button>
                           )}
                         </div>
 
@@ -429,7 +441,7 @@ export function Het() {
                                       color: 'var(--color-red)', fontWeight: 600, fontSize: 11,
                                       background: 'rgba(242,107,107,0.1)', padding: '2px 7px',
                                       borderRadius: 100, border: '1px solid rgba(242,107,107,0.25)',
-                                    }}>? Nincs vezető</span>
+                                    }}>{copy.status.noDriver}</span>
                                   ) : (
                                     <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--color-muted-2)' }}>
                                       <span style={{
@@ -448,7 +460,7 @@ export function Het() {
                                       border: '1px solid rgba(245,200,66,0.25)',
                                       borderRadius: 4, padding: '1px 6px', flexShrink: 0,
                                     }}>
-                                      ⚡ <DirectionBadge direction={transfer.pairedDir as LegDirection} size={11} /> {transfer.pairedOccTitle}
+                                      <Icon name="arrows-in-simple" size={11} /> <DirectionBadge direction={transfer.pairedDir as LegDirection} size={11} /> {transfer.pairedOccTitle}
                                     </span>
                                   )}
                                 </div>
@@ -489,9 +501,9 @@ export function Het() {
                       background: g.isToday ? 'var(--color-blue)' : 'var(--color-surface-2)',
                       color: g.isToday ? '#fff' : 'var(--color-muted)',
                     }}>{g.dayNum}</div>
-                    <div style={{ fontSize: 12, color: 'var(--color-muted)', textTransform: 'capitalize' }}>{g.label}</div>
+                    <div style={{ fontSize: 12, color: 'var(--color-muted)' }}>{g.label}</div>
                     {isDropTarget && (
-                      <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--color-blue)', fontWeight: 600 }}>↓ ide</span>
+                      <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--color-blue)', fontWeight: 600 }}>{copy.week.dropHere}</span>
                     )}
                   </div>
                 )

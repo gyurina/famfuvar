@@ -3,9 +3,9 @@ import { Header } from '../components/Header'
 import { supabase } from '../lib/supabase'
 import { useHousehold } from '../hooks/useHousehold'
 import type { ScheduleTemplate, TravelGroup } from '../types'
-import { format } from 'date-fns'
-
-const WEEKDAYS = ['Hétfő','Kedd','Szerda','Csütörtök','Péntek','Szombat','Vasárnap']
+import { copy } from '../copy'
+import { formatShortDate, toIsoDate } from '../lib/format'
+import { Icon } from '../components/Icon'
 
 type Mode = 'single' | 'group'
 
@@ -29,7 +29,7 @@ const EMPTY: FormData = {
   person_id: '', group_id: '', title: '', weekdays: [1],
   starts_at: '08:00', ends_at: '10:00',
   location_id: '', needs_dropoff: true, needs_pickup: true,
-  valid_from: format(new Date(), 'yyyy-MM-dd'), valid_to: '',
+  valid_from: toIsoDate(new Date()), valid_to: '',
 }
 
 export function Sablon() {
@@ -92,19 +92,19 @@ export function Sablon() {
   async function handleSave() {
     if (!householdId) return
     if (form.mode === 'single' && !form.person_id) {
-      setError('Válassz gyereket!'); return
+      setError(copy.schedule.pickChild); return
     }
     if (form.mode === 'group' && !form.group_id) {
-      setError('Válassz csoportot!'); return
+      setError(copy.schedule.pickGroup); return
     }
     if (!form.location_id || !form.title) {
-      setError('Töltsd ki a kötelező mezőket!'); return
+      setError(copy.schedule.fillRequired); return
     }
     if (form.starts_at >= form.ends_at) {
-      setError('A befejezési időnek a kezdési idő után kell lennie!'); return
+      setError(copy.schedule.timeOrder); return
     }
     if (form.weekdays.length === 0) {
-      setError('Válassz legalább egy napot!'); return
+      setError(copy.schedule.pickDay); return
     }
     setSaving(true); setError(null)
     const basePayload = {
@@ -153,15 +153,15 @@ export function Sablon() {
       p_household_id: householdId,
       p_days_ahead:   30,
     })
-    if (err) setGenResult('Hiba: ' + err.message)
-    else setGenResult(`Kész! ${data ?? 0} sor generálva (30 nap)`)
+    if (err) setGenResult(copy.schedule.generateError(err.message))
+    else setGenResult(copy.schedule.generateDone(data ?? 0))
     setGenerating(false)
   }
 
   const childMap = Object.fromEntries(children.map(c => [c.id, c]))
   const locMap   = Object.fromEntries(locations.map(l => [l.id, l]))
   const groupMap = Object.fromEntries(groups.map(g => [g.id, g]))
-  const grouped  = WEEKDAYS.map((name, i) => ({
+  const grouped  = copy.weekday.long.map((name, i) => ({
     name, weekday: i + 1,
     rows: templates.filter(t => t.weekday === i + 1),
   }))
@@ -180,17 +180,17 @@ export function Sablon() {
   return (
     <div style={{ background: 'var(--color-bg)', minHeight: '100dvh' }}>
       <Header
-        title="Sablon"
-        subtitle="Ismétlődő órarend"
+        title={copy.schedule.title}
+        subtitle={copy.schedule.subtitle}
         action={
           <button
             onClick={openNew}
             style={{
               background: 'var(--color-blue)', color: '#fff', border: 'none',
               borderRadius: 'var(--r-sm)', padding: '6px 14px', fontWeight: 700,
-              fontSize: 13, cursor: 'pointer',
+              fontSize: 13, cursor: 'pointer', minHeight: 44, display: 'flex', alignItems: 'center', gap: 4,
             }}
-          >+ Új</button>
+          ><Icon name="plus" size={14} weight="bold" /> {copy.common.new}</button>
         }
       />
 
@@ -198,9 +198,9 @@ export function Sablon() {
       <div style={{ margin: '12px 16px 0', padding: '12px 14px', borderRadius: 'var(--r-md)', background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
           <div>
-            <div style={{ fontSize: 13, fontWeight: 600 }}>Occurrence generálás</div>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>{copy.schedule.generate}</div>
             <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2 }}>
-              Sablonokból létrehozza a következő 30 nap programjait és fuvarjait
+              {copy.schedule.generateHint}
             </div>
           </div>
           <button
@@ -213,21 +213,21 @@ export function Sablon() {
               border: `1px solid ${generating ? 'var(--color-border)' : 'rgba(45,216,138,0.3)'}`,
               fontWeight: 600, fontSize: 12, cursor: generating ? 'default' : 'pointer',
             }}
-          >{generating ? '⏳ Fut…' : '▶ Generálj'}</button>
+          >{generating ? copy.schedule.generating : copy.schedule.generate}</button>
         </div>
         {genResult && (
           <div style={{
             marginTop: 8, padding: '7px 10px', borderRadius: 'var(--r-sm)', fontSize: 12,
-            background: genResult.startsWith('Hiba') ? 'rgba(242,107,107,0.1)' : 'rgba(45,216,138,0.08)',
-            color: genResult.startsWith('Hiba') ? 'var(--color-red)' : 'var(--color-green)',
-            border: `1px solid ${genResult.startsWith('Hiba') ? 'rgba(242,107,107,0.25)' : 'rgba(45,216,138,0.2)'}`,
+            background: genResult.startsWith(copy.common.error) ? 'rgba(242,107,107,0.1)' : 'rgba(45,216,138,0.08)',
+            color: genResult.startsWith(copy.common.error) ? 'var(--color-red)' : 'var(--color-green)',
+            border: `1px solid ${genResult.startsWith(copy.common.error) ? 'rgba(242,107,107,0.25)' : 'rgba(45,216,138,0.2)'}`,
           }}>{genResult}</div>
         )}
       </div>
 
       {loading && (
         <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--color-muted)', fontSize: 13 }}>
-          Betöltés…
+          {copy.common.loading}
         </div>
       )}
 
@@ -235,9 +235,9 @@ export function Sablon() {
         <div style={{ padding: '16px 16px 96px' }}>
           {templates.length === 0 && (
             <div className="empty-state">
-              <div className="icon">📋</div>
-              <div className="title">Nincs sablon</div>
-              <div className="sub">Adj hozzá egyet a + Új gombbal</div>
+              <div className="icon"><Icon name="clipboard" size={40} weight="thin" color="#3a5670" /></div>
+              <div className="title">{copy.schedule.emptyTitle}</div>
+              <div className="sub">{copy.schedule.emptySub}</div>
             </div>
           )}
 
@@ -265,19 +265,19 @@ export function Sablon() {
                           </span>
                           <span style={{ fontSize: 13, fontWeight: 600 }}>{t.title}</span>
                           {child && (
-                            <span style={{ fontSize: 11, color: child.color }}>{child.display_name}</span>
+                            <span style={{ fontSize: 11, color: 'var(--color-text-2)' }}>{child.display_name}</span>
                           )}
                           {group && (
-                            <span style={{ fontSize: 11, color: 'var(--color-blue)', background: 'rgba(79,156,249,0.1)', padding: '1px 6px', borderRadius: 'var(--r-sm)' }}>
-                              👥 {group.name}
+                            <span style={{ fontSize: 11, color: 'var(--color-blue)', background: 'rgba(79,156,249,0.1)', padding: '1px 6px', borderRadius: 'var(--r-sm)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                              <Icon name="users-three" size={12} /> {group.name}
                             </span>
                           )}
                         </div>
                         <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2 }}>
-                          {loc?.name ?? '?'}
-                          {t.needs_dropoff ? ' · →oda' : ''}
-                          {t.needs_pickup  ? ' · ←vissza' : ''}
-                          {t.valid_to ? ` · ig: ${t.valid_to}` : ''}
+                          {loc?.name ?? copy.common.unknown}
+                          {t.needs_dropoff ? ` · ${copy.direction.viszi}` : ''}
+                          {t.needs_pickup  ? ` · ${copy.direction.begyujti}` : ''}
+                          {t.valid_to ? ` · ${copy.form.until(formatShortDate(t.valid_to))}` : ''}
                         </div>
                       </div>
                       <div style={{ color: 'var(--color-muted)', fontSize: 16, padding: '0 4px' }}>›</div>
@@ -302,43 +302,48 @@ export function Sablon() {
             padding: '20px 20px 48px', boxShadow: 'var(--shadow-popup)',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-              <div style={{ fontSize: 16, fontWeight: 700 }}>{editing ? 'Sablon szerkesztése' : 'Új sablon-sor'}</div>
-              <button onClick={() => setShowForm(false)}
-                style={{ background: 'none', border: 'none', color: 'var(--color-muted)', fontSize: 22, cursor: 'pointer', lineHeight: 1 }}>✕</button>
+              <div style={{ fontSize: 16, fontWeight: 700 }}>{editing ? copy.schedule.editRow : copy.schedule.newRow}</div>
+              <button onClick={() => setShowForm(false)} aria-label={copy.a11y.close}
+                style={{ background: 'none', border: 'none', color: 'var(--color-muted)', cursor: 'pointer',
+                  width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="x" size={22} />
+              </button>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
               {/* Mód: Gyerek vs Csoport */}
               <div>
-                <label style={labelStyle}>Kinek *</label>
+                <label style={labelStyle}>{copy.form.whoRequired}</label>
                 <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                  {([['single', '👤 Gyerek'], ['group', '👥 Csoport']] as [Mode, string][]).map(([m, label]) => (
+                  {([['single', copy.form.child] as const, ['group', copy.form.group] as const]).map(([m, label]) => (
                     <button key={m} onClick={() => setForm(f => ({ ...f, mode: m }))}
                       style={{
                         flex: 1, padding: '8px 0', borderRadius: 'var(--r-sm)', border: 'none',
-                        fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                        fontSize: 13, fontWeight: 600, cursor: 'pointer', minHeight: 44,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                         background: form.mode === m ? 'var(--color-blue)' : 'var(--color-surface-2)',
                         color: form.mode === m ? '#fff' : 'var(--color-muted)',
                       }}>
+                      <Icon name={m === 'single' ? 'person-simple-walk' : 'users-three'} size={16} />
                       {label}
                     </button>
                   ))}
                 </div>
                 {form.mode === 'single' ? (
                   <select style={inputStyle} value={form.person_id} onChange={e => setForm(f => ({...f, person_id: e.target.value}))}>
-                    <option value="">Válassz gyereket…</option>
+                    <option value="">{copy.form.pickChild}</option>
                     {children.map(c => <option key={c.id} value={c.id}>{c.display_name}</option>)}
                   </select>
                 ) : (
                   <>
                     <select style={inputStyle} value={form.group_id} onChange={e => setForm(f => ({...f, group_id: e.target.value}))}>
-                      <option value="">Válassz csoportot…</option>
+                      <option value="">{copy.form.pickGroup}</option>
                       {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
                     </select>
                     {groups.length === 0 && (
                       <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 4 }}>
-                        Még nincs csoport. Hozz létre egyet a Beállítások → Csoportok fülön.
+                        {copy.schedule.noGroups}
                       </div>
                     )}
                   </>
@@ -347,16 +352,15 @@ export function Sablon() {
 
               {/* Cím */}
               <div>
-                <label style={labelStyle}>Program neve *</label>
-                <input style={inputStyle} value={form.title} placeholder="pl. Zeneiskola"
+                <label style={labelStyle}>{copy.form.programNameRequired}</label>
+                <input style={inputStyle} value={form.title} placeholder={copy.form.placeholderProgram}
                   onChange={e => setForm(f => ({...f, title: e.target.value}))} />
               </div>
 
-              {/* Nap(ok) – szerkesztéskor egyszeres, létrehozáskor többszörös */}
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
                   <label style={labelStyle}>
-                    {editing ? 'Nap' : 'Nap(ok)'}
+                    {editing ? copy.schedule.day : copy.schedule.days}
                   </label>
                   {!editing && (
                     <button
@@ -368,18 +372,18 @@ export function Sablon() {
                       }))}
                       style={{
                         fontSize: 11, padding: '2px 8px', borderRadius: 6, border: 'none',
-                        cursor: 'pointer', fontWeight: 600,
+                        cursor: 'pointer', fontWeight: 600, minHeight: 44,
                         background: form.weekdays.length === 5 && form.weekdays.every(d => d <= 5)
                           ? 'var(--color-blue)' : 'var(--color-surface-2)',
                         color: form.weekdays.length === 5 && form.weekdays.every(d => d <= 5)
                           ? '#fff' : 'var(--color-muted)',
                       }}>
-                      H–P
+                      {copy.schedule.weekdaysMonFri}
                     </button>
                   )}
                 </div>
                 <div style={{ display: 'flex', gap: 4 }}>
-                  {WEEKDAYS.map((d, i) => {
+                  {copy.weekday.short.map((d, i) => {
                     const wd = i + 1
                     const selected = form.weekdays.includes(wd)
                     return (
@@ -398,76 +402,73 @@ export function Sablon() {
                         }}
                         style={{
                           flex: 1, padding: '8px 0', borderRadius: 'var(--r-sm)', border: 'none',
-                          fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                          fontSize: 11, fontWeight: 600, cursor: 'pointer', minHeight: 44,
                           background: selected ? 'var(--color-blue)' : 'var(--color-surface-2)',
                           color: selected ? '#fff' : 'var(--color-muted)',
                         }}>
-                        {d[0]}
+                        {d}
                       </button>
                     )
                   })}
                 </div>
                 {!editing && form.weekdays.length > 1 && (
                   <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 4 }}>
-                    {form.weekdays.length} napra hoz létre sablont
+                    {copy.schedule.createNDays(form.weekdays.length)}
                   </div>
                 )}
               </div>
 
-              {/* Idő */}
               <div style={{ display: 'flex', gap: 12 }}>
                 <div style={{ flex: 1 }}>
-                  <label style={labelStyle}>Kezdés</label>
+                  <label style={labelStyle}>{copy.form.start}</label>
                   <input type="time" style={inputStyle} value={form.starts_at}
                     onChange={e => setForm(f => ({...f, starts_at: e.target.value}))} />
                 </div>
                 <div style={{ flex: 1 }}>
-                  <label style={labelStyle}>Vége</label>
+                  <label style={labelStyle}>{copy.form.end}</label>
                   <input type="time" style={inputStyle} value={form.ends_at}
                     onChange={e => setForm(f => ({...f, ends_at: e.target.value}))} />
                 </div>
               </div>
 
-              {/* Helyszín */}
               <div>
-                <label style={labelStyle}>Helyszín *</label>
+                <label style={labelStyle}>{copy.form.locationRequired}</label>
                 <select style={inputStyle} value={form.location_id} onChange={e => setForm(f => ({...f, location_id: e.target.value}))}>
-                  <option value="">Válassz…</option>
+                  <option value="">{copy.form.pick}</option>
                   {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
                 </select>
               </div>
 
-              {/* Fuvar */}
               <div>
-                <label style={labelStyle}>Szállítás</label>
+                <label style={labelStyle}>{copy.form.transport}</label>
                 <div style={{ display: 'flex', gap: 8 }}>
                   {[
-                    { label: 'Odavitel', key: 'needs_dropoff' as const },
-                    { label: 'Visszahozás', key: 'needs_pickup' as const },
+                    { label: copy.schedule.outbound, key: 'needs_dropoff' as const },
+                    { label: copy.schedule.inbound, key: 'needs_pickup' as const },
                   ].map(({ label, key }) => (
                     <button key={key} onClick={() => setForm(f => ({...f, [key]: !f[key]}))}
                       style={{
                         flex: 1, padding: '9px 0', borderRadius: 'var(--r-sm)',
-                        fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                        fontSize: 12, fontWeight: 600, cursor: 'pointer', minHeight: 44,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                         background: form[key] ? 'rgba(79,156,249,0.12)' : 'var(--color-surface-2)',
                         color: form[key] ? 'var(--color-blue)' : 'var(--color-muted)',
                         border: `1px solid ${form[key] ? 'rgba(79,156,249,0.3)' : 'var(--color-border)'}`,
                       }}>
-                      {form[key] ? '✓ ' : ''}{label}
+                      {form[key] ? <Icon name="check" size={14} weight="bold" /> : null}{label}
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* Érvényesség */}
               <div style={{ display: 'flex', gap: 12 }}>
                 <div style={{ flex: 1 }}>
-                  <label style={labelStyle}>Érvényes-től</label>
+                  <label style={labelStyle}>{copy.schedule.validFrom}</label>
                   <input type="date" style={inputStyle} value={form.valid_from}
                     onChange={e => setForm(f => ({...f, valid_from: e.target.value}))} />
                 </div>
                 <div style={{ flex: 1 }}>
-                  <label style={labelStyle}>Érvényes-ig (üres=örök)</label>
+                  <label style={labelStyle}>{copy.schedule.validTo}</label>
                   <input type="date" style={inputStyle} value={form.valid_to}
                     onChange={e => setForm(f => ({...f, valid_to: e.target.value}))} />
                 </div>
@@ -484,29 +485,29 @@ export function Sablon() {
                   marginTop: 4, padding: '13px', borderRadius: 'var(--r-md)', border: 'none',
                   background: saving ? 'var(--color-border)' : 'var(--color-blue)',
                   color: '#fff', fontWeight: 700, fontSize: 15,
-                  cursor: saving ? 'default' : 'pointer',
-                }}>{saving ? 'Mentés…' : editing ? 'Módosítás mentése' : 'Sablon hozzáadása'}</button>
+                  cursor: saving ? 'default' : 'pointer', minHeight: 44,
+                }}>{saving ? copy.common.saving : editing ? copy.events.saveEdit : copy.schedule.addRow}</button>
 
-              {/* Delete — inline confirm */}
               {editing && (
                 deleteConfirm === editing.id ? (
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button onClick={() => setDeleteConfirm(null)}
                       style={{ flex: 1, padding: '11px', borderRadius: 'var(--r-md)', border: '1px solid var(--color-border)',
-                        background: 'transparent', color: 'var(--color-muted)', fontWeight: 600, fontSize: 14, cursor: 'pointer' }}>
-                      Mégsem
+                        background: 'transparent', color: 'var(--color-muted)', fontWeight: 600, fontSize: 14, cursor: 'pointer', minHeight: 44 }}>
+                      {copy.common.cancel}
                     </button>
                     <button onClick={() => handleDelete(editing.id)}
                       style={{ flex: 1, padding: '11px', borderRadius: 'var(--r-md)', border: '1px solid rgba(242,107,107,0.3)',
-                        background: 'rgba(242,107,107,0.1)', color: 'var(--color-red)', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>
-                      Igen, törlöm
+                        background: 'rgba(242,107,107,0.1)', color: 'var(--color-red)', fontWeight: 700, fontSize: 14, cursor: 'pointer', minHeight: 44 }}>
+                      {copy.common.yesDelete}
                     </button>
                   </div>
                 ) : (
                   <button onClick={() => setDeleteConfirm(editing.id)}
                     style={{ padding: '11px', borderRadius: 'var(--r-md)', border: '1px solid rgba(242,107,107,0.3)',
-                      background: 'transparent', color: 'var(--color-red)', fontWeight: 600, fontSize: 14, cursor: 'pointer' }}>
-                    🗑 Sablon törlése
+                      background: 'transparent', color: 'var(--color-red)', fontWeight: 600, fontSize: 14, cursor: 'pointer',
+                      minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, width: '100%' }}>
+                    <Icon name="trash" size={16} /> {copy.schedule.deleteRow}
                   </button>
                 )
               )}

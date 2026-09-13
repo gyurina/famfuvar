@@ -4,11 +4,12 @@
  * vagy megjegyzés fűzhető egy adott alkalmhoz.
  */
 import { useState, useEffect } from 'react'
-import { format } from 'date-fns'
-import { hu } from 'date-fns/locale'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import type { Person, Occurrence } from '../types'
+import { copy } from '../copy'
+import { formatDayLong, toIsoDate } from '../lib/format'
+import { Icon } from './Icon'
 
 interface Props {
   householdId: string
@@ -27,17 +28,15 @@ type QuickAction = 'cancel' | 'note'
 
 export function QuickLogModal({ householdId, persons, onClose, onDone }: Props) {
   const { person: me } = useAuth()
-  const today = format(new Date(), 'yyyy-MM-dd')
-  const todayLabel = format(new Date(), 'EEEE, MMM d.', { locale: hu })
+  const today = toIsoDate(new Date())
+  const todayLabel = formatDayLong(new Date())
 
   const targets = persons.filter(p => p.role === 'child' || p.role === 'parent')
   const [personId, setPersonId] = useState(targets.find(p => p.role === 'child')?.id ?? targets[0]?.id ?? '')
   const [action,   setAction]   = useState<QuickAction>('cancel')
   const [occs,     setOccs]     = useState<Occurrence[]>([])
   const [loading,  setLoading]  = useState(false)
-  // cancel mode: set of selected occurrence ids (all preselected)
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  // note mode: single selected occ
   const [noteOccId, setNoteOccId] = useState<string | null>(null)
   const [note,     setNote]     = useState('')
   const [saving,   setSaving]   = useState(false)
@@ -59,7 +58,7 @@ export function QuickLogModal({ householdId, persons, onClose, onDone }: Props) 
         setNoteOccId(list[0]?.id ?? null)
         setLoading(false)
       })
-  }, [personId, householdId])
+  }, [personId, householdId, today])
 
   function toggleSelect(id: string) {
     setSelected(s => {
@@ -74,7 +73,7 @@ export function QuickLogModal({ householdId, persons, onClose, onDone }: Props) 
     try {
       if (action === 'cancel') {
         const ids = [...selected]
-        if (!ids.length) { setError('Jelölj ki legalább egy programot.'); setSaving(false); return }
+        if (!ids.length) { setError(copy.quickLog.pickAtLeastOne); setSaving(false); return }
         const { error: err } = await supabase.from('occurrence').update({
           status: 'cancelled', is_override: true,
           updated_at: new Date().toISOString(),
@@ -83,8 +82,8 @@ export function QuickLogModal({ householdId, persons, onClose, onDone }: Props) 
         }).in('id', ids)
         if (err) throw err
       } else {
-        if (!noteOccId) { setError('Válassz ki egy programot.'); setSaving(false); return }
-        if (!note.trim()) { setError('Írj be egy megjegyzést.'); setSaving(false); return }
+        if (!noteOccId) { setError(copy.quickLog.pickProgram); setSaving(false); return }
+        if (!note.trim()) { setError(copy.quickLog.writeNote); setSaving(false); return }
         const { error: err } = await supabase.from('occurrence').update({
           note: note.trim(), is_override: true,
           updated_at: new Date().toISOString(),
@@ -113,50 +112,58 @@ export function QuickLogModal({ householdId, persons, onClose, onDone }: Props) 
         padding: '20px 20px calc(20px + env(safe-area-inset-bottom))',
         display: 'flex', flexDirection: 'column', gap: 14,
       }}>
-        {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
-            <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>⚡ Gyors rögzítés</h3>
+            <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Icon name="note-pencil" size={20} weight="fill" />
+              {copy.quickLog.title}
+            </h3>
             <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2 }}>{todayLabel}</div>
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20,
-            cursor: 'pointer', color: 'var(--color-muted)', lineHeight: 1 }}>✕</button>
+          <button onClick={onClose} aria-label={copy.a11y.close} style={{
+            background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-muted)',
+            width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Icon name="x" size={20} />
+          </button>
         </div>
 
-        {/* Személy választó */}
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {targets.map(p => (
             <button key={p.id} onClick={() => setPersonId(p.id)} style={{
               padding: '7px 14px', borderRadius: 100, fontSize: 13, fontWeight: 600, cursor: 'pointer',
+              minHeight: 44,
               background: personId === p.id ? p.color + '22' : 'var(--color-surface-2)',
               border: `1.5px solid ${personId === p.id ? p.color : 'var(--color-border)'}`,
-              color: personId === p.id ? p.color : 'var(--color-muted)',
+              color: personId === p.id ? 'var(--color-text)' : 'var(--color-muted)',
             }}>{p.display_name}</button>
           ))}
         </div>
 
-        {/* Akció választó */}
         <div style={{ display: 'flex', gap: 8 }}>
           {([
-            { value: 'cancel', label: '🚫 Elmarad', desc: 'Program(ok) lemondása' },
-            { value: 'note',   label: '📝 Megjegyzés', desc: 'Rögzítés részletek nélkül' },
-          ] as const).map(a => (
+            { value: 'cancel' as const, label: copy.quickLog.cancelLabel, desc: copy.quickLog.cancelDesc, icon: 'calendar-x' as const },
+            { value: 'note' as const,   label: copy.quickLog.noteLabel,   desc: copy.quickLog.noteDesc,   icon: 'note-pencil' as const },
+          ]).map(a => (
             <button key={a.value} onClick={() => setAction(a.value)} style={{
               flex: 1, padding: '10px 8px', borderRadius: 10, cursor: 'pointer', textAlign: 'left',
+              minHeight: 44,
               background: action === a.value ? 'rgba(79,156,249,0.1)' : 'var(--color-surface-2)',
               border: `1.5px solid ${action === a.value ? 'var(--color-blue)' : 'var(--color-border)'}`,
             }}>
-              <div style={{ fontSize: 13, fontWeight: 700,
-                color: action === a.value ? 'var(--color-blue)' : 'var(--color-text)' }}>{a.label}</div>
+              <div style={{ fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6,
+                color: action === a.value ? 'var(--color-blue)' : 'var(--color-text)' }}>
+                <Icon name={a.icon} size={16} />
+                {a.label}
+              </div>
               <div style={{ fontSize: 10, color: 'var(--color-muted)', marginTop: 2 }}>{a.desc}</div>
             </button>
           ))}
         </div>
 
-        {/* Mai programok listája */}
         {loading && (
           <div style={{ textAlign: 'center', fontSize: 13, color: 'var(--color-muted)', padding: '12px 0' }}>
-            Betöltés…
+            {copy.common.loading}
           </div>
         )}
 
@@ -166,23 +173,24 @@ export function QuickLogModal({ householdId, persons, onClose, onDone }: Props) 
             padding: '16px 0', background: 'var(--color-surface-2)',
             borderRadius: 10, border: '1px solid var(--color-border)',
           }}>
-            Nincs aktív program ma{activePerson ? ` — ${activePerson.display_name}` : ''}.
+            {activePerson ? copy.quickLog.noPrograms(activePerson.display_name) : copy.quickLog.noProgramsGeneric}
           </div>
         )}
 
         {!loading && occs.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {/* Cancel all / none quick-select */}
             {action === 'cancel' && occs.length > 1 && (
               <div style={{ display: 'flex', gap: 8, marginBottom: 2 }}>
                 <button onClick={() => setSelected(new Set(occs.map(o => o.id)))}
                   style={{ fontSize: 11, padding: '3px 10px', borderRadius: 8, cursor: 'pointer',
+                    minHeight: 44,
                     background: 'transparent', border: '1px solid var(--color-border)',
-                    color: 'var(--color-muted)' }}>Mind</button>
+                    color: 'var(--color-muted)' }}>{copy.rides.filterAll}</button>
                 <button onClick={() => setSelected(new Set())}
                   style={{ fontSize: 11, padding: '3px 10px', borderRadius: 8, cursor: 'pointer',
+                    minHeight: 44,
                     background: 'transparent', border: '1px solid var(--color-border)',
-                    color: 'var(--color-muted)' }}>Egyik sem</button>
+                    color: 'var(--color-muted)' }}>{copy.common.none}</button>
               </div>
             )}
 
@@ -200,6 +208,7 @@ export function QuickLogModal({ householdId, persons, onClose, onDone }: Props) 
                   style={{
                     display: 'flex', alignItems: 'center', gap: 12,
                     padding: '11px 14px', borderRadius: 12, cursor: 'pointer', textAlign: 'left',
+                    minHeight: 44,
                     background: isActive
                       ? (action === 'cancel' ? 'rgba(239,68,68,0.08)' : 'rgba(79,156,249,0.08)')
                       : 'var(--color-surface-2)',
@@ -210,7 +219,6 @@ export function QuickLogModal({ householdId, persons, onClose, onDone }: Props) 
                     borderLeft: `4px solid ${activePerson?.color ?? 'var(--color-border)'}`,
                     transition: 'border-color 0.15s',
                   }}>
-                  {/* Checkbox / radio indicator */}
                   <span style={{
                     width: 20, height: 20, borderRadius: action === 'cancel' ? 5 : '50%',
                     border: `2px solid ${isActive
@@ -220,9 +228,9 @@ export function QuickLogModal({ householdId, persons, onClose, onDone }: Props) 
                       ? (action === 'cancel' ? '#f87171' : 'var(--color-blue)')
                       : 'transparent',
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    flexShrink: 0, fontSize: 12, color: '#fff', fontWeight: 700,
+                    flexShrink: 0, color: '#fff',
                   }}>
-                    {isActive ? (action === 'cancel' ? '✕' : '●') : ''}
+                    {isActive && <Icon name={action === 'cancel' ? 'x' : 'check'} size={12} weight="bold" color="#fff" />}
                   </span>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{
@@ -243,31 +251,29 @@ export function QuickLogModal({ householdId, persons, onClose, onDone }: Props) 
           </div>
         )}
 
-        {/* Megjegyzés mező */}
         <input style={inp}
-          placeholder={action === 'cancel' ? 'Ok / megjegyzés (opcionális)…' : 'Megjegyzés *…'}
+          placeholder={action === 'cancel' ? copy.quickLog.cancelPlaceholder : copy.quickLog.notePlaceholder}
           value={note} onChange={e => setNote(e.target.value)} />
 
         {error && <div style={{ fontSize: 12, color: 'var(--color-red)' }}>{error}</div>}
 
-        {/* Gombok */}
         <div style={{ display: 'flex', gap: 10 }}>
           <button onClick={onClose} style={{
             flex: 1, padding: 11, borderRadius: 10, fontSize: 14, fontWeight: 600,
             background: 'var(--color-surface-2)', border: '1px solid var(--color-border)',
-            color: 'var(--color-muted)', cursor: 'pointer',
-          }}>Mégsem</button>
+            color: 'var(--color-muted)', cursor: 'pointer', minHeight: 44,
+          }}>{copy.common.cancel}</button>
           <button onClick={handleSave} disabled={saving || occs.length === 0} style={{
             flex: 2, padding: 11, borderRadius: 10, fontSize: 14, fontWeight: 700,
             background: action === 'cancel' ? '#ef4444' : 'var(--color-blue)',
-            color: '#fff', border: 'none', cursor: 'pointer',
+            color: '#fff', border: 'none', cursor: 'pointer', minHeight: 44,
             opacity: (saving || occs.length === 0) ? 0.5 : 1,
           }}>
             {saving
-              ? 'Mentés…'
+              ? copy.common.saving
               : action === 'cancel'
-                ? `🚫 ${selected.size > 1 ? `${selected.size} program` : 'Program'} lemondva`
-                : '📝 Megjegyzés rögzítve'}
+                ? copy.quickLog.cancelSubmit(selected.size)
+                : copy.quickLog.noteSubmit}
           </button>
         </div>
       </div>

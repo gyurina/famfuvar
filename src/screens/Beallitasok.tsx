@@ -4,13 +4,13 @@ import { supabase } from '../lib/supabase'
 import { useHousehold } from '../hooks/useHousehold'
 import { useAuth } from '../lib/auth'
 import { getPref, setPref, PREF_HIDE_CANCELLED } from '../lib/prefs'
-import type { ExternalCalendar, Location, TravelTime, DriverAvailability, UnavailableBlock, TravelGroup, TravelGroupMember, PushLog, BreakPeriod, BreakReason } from '../types'
+import type { ExternalCalendar, Location, TravelTime, DriverAvailability, UnavailableBlock, TravelGroup, TravelGroupMember, PushLog, BreakPeriod, BreakReason, PersonRole } from '../types'
 import { isPushSupported, isPushSubscribed, subscribeToPush, unsubscribeFromPush } from '../lib/push'
 import { startGoogleAuth, syncNow, disconnectGoogle, fetchGoogleCalendars } from '../lib/googleCalendar'
 import { forceRegenerateLegs } from '../lib/occurrences'
-import { format } from 'date-fns'
-
-const WEEKDAYS = ['Hétfő','Kedd','Szerda','Csütörtök','Péntek','Szombat','Vasárnap']
+import { copy } from '../copy'
+import { formatShortDate, formatDateTime } from '../lib/format'
+import { Icon } from '../components/Icon'
 type Tab = 'helyszin' | 'utido' | 'elerheto' | 'nem_elerheto' | 'csoportok' | 'szunetek' | 'naptarak' | 'push' | 'diagnozis'
 
 const inp: React.CSSProperties = {
@@ -53,6 +53,8 @@ export function Beallitasok() {
   const [googleCals, setGoogleCals] = useState<Array<{ id: string; person_id: string; display_name: string; last_synced_at: string | null }>>([])
   const [syncing, setSyncing]       = useState(false)
   const [googleMsg, setGoogleMsg]   = useState<string | null>(null)
+  const [googleOk, setGoogleOk]     = useState(false)
+  const [pushOk, setPushOk]         = useState(false)
   const pushSupported = isPushSupported()
 
   useEffect(() => {
@@ -146,11 +148,13 @@ export function Beallitasok() {
         }
       )
       const json = await res.json()
-      setPushResult(`✓ Elküldve ${json.sent ?? 0} eszközre${json.failed ? ` (${json.failed} hiba)` : ''}`)
+      setPushResult(copy.settings.pushSent(json.sent ?? 0, json.failed))
+      setPushOk(true)
       setPushTitle(''); setPushBody(''); setPushTargetIds([])
       await refreshPushLogs()
     } catch (e) {
-      setPushResult(`❌ Hiba: ${String(e)}`)
+      setPushResult(copy.settings.pushError(String(e)))
+      setPushOk(false)
     }
     setPushSending(false)
   }
@@ -203,10 +207,12 @@ export function Beallitasok() {
     const params = new URLSearchParams(window.location.search)
     const googleStatus = params.get('google')
     if (googleStatus === 'connected') {
-      setGoogleMsg('✓ Google Calendar sikeresen csatlakoztatva!')
+      setGoogleMsg(copy.settings.googleOk)
+      setGoogleOk(true)
       window.history.replaceState({}, '', window.location.pathname)
     } else if (googleStatus === 'error') {
-      setGoogleMsg('⚠ Google Calendar csatlakoztatás nem sikerült.')
+      setGoogleMsg(copy.settings.googleFail)
+      setGoogleOk(false)
       window.history.replaceState({}, '', window.location.pathname)
     }
   }, [])
@@ -230,15 +236,15 @@ export function Beallitasok() {
   }
 
   const tabs: { key: Tab; label: string }[] = [
-    { key: 'helyszin', label: 'Helyszínek' },
-    { key: 'utido',    label: 'Útidő' },
-    { key: 'elerheto', label: 'Elérhetőség' },
-    { key: 'nem_elerheto', label: 'Nem elérhető' },
-    { key: 'naptarak', label: 'Naptárak' },
-    { key: 'csoportok', label: '👥 Csoportok' },
-    { key: 'szunetek',  label: '⏸ Szünetek' },
-    { key: 'push',      label: '📣 Üzenet' },
-    { key: 'diagnozis', label: '🩺 Diagnózis' },
+    { key: 'helyszin', label: copy.settings.tabs.locations },
+    { key: 'utido',    label: copy.settings.tabs.travel },
+    { key: 'elerheto', label: copy.settings.tabs.available },
+    { key: 'nem_elerheto', label: copy.settings.tabs.unavailable },
+    { key: 'naptarak', label: copy.settings.tabs.calendars },
+    { key: 'csoportok', label: copy.settings.tabs.groups },
+    { key: 'szunetek',  label: copy.settings.tabs.absences },
+    { key: 'push',      label: copy.settings.tabs.message },
+    { key: 'diagnozis', label: copy.settings.tabs.diagnose },
   ]
 
   // ── Helyszínek state ──
@@ -277,7 +283,7 @@ export function Beallitasok() {
   }
 
   async function deleteLoc(id: string) {
-    if (!confirm('Biztosan törlöd ezt a helyszínt?')) return
+    if (!confirm(copy.settings.confirmDeleteLocation)) return
     const { error } = await supabase.from('location').delete().eq('id', id)
     if (error) { alert(error.message); return }
     setLocations(ls => ls.filter(l => l.id !== id))
@@ -318,7 +324,7 @@ export function Beallitasok() {
   async function saveTT() {
     if (!editTT) return
     const mins = parseInt(editTTMin, 10)
-    if (isNaN(mins) || mins < 1) { setTTError('Érvényes percszámot adj meg'); return }
+    if (isNaN(mins) || mins < 1) { setTTError(copy.settings.invalidMinutes); return }
     setTTSaving(true); setTTError(null)
     const { error } = await supabase.from('travel_time')
       .update({ minutes: mins })
@@ -333,7 +339,7 @@ export function Beallitasok() {
   }
 
   async function deleteTT(from: string, to: string) {
-    if (!confirm('Törlöd ezt az útvonalat?')) return
+    if (!confirm(copy.settings.confirmDeleteRoute)) return
     const { error } = await supabase.from('travel_time')
       .delete().eq('from_location', from).eq('to_location', to)
     if (error) { alert(error.message); return }
@@ -343,7 +349,7 @@ export function Beallitasok() {
   async function addTT() {
     if (!newTTFrom || !newTTTo || !householdId) return
     const mins = parseInt(newTTMin, 10)
-    if (isNaN(mins) || mins < 1) { setTTError('Érvényes percszámot adj meg'); return }
+    if (isNaN(mins) || mins < 1) { setTTError(copy.settings.invalidMinutes); return }
     setTTSaving(true); setTTError(null)
     const { data, error } = await supabase.from('travel_time').insert({
       household_id: householdId,
@@ -431,8 +437,8 @@ export function Beallitasok() {
   }
 
   async function saveGroup() {
-    if (!householdId || !groupName.trim()) { setGroupError('A csoport nevét kötelező megadni!'); return }
-    if (groupMemberIds.length < 2) { setGroupError('Legalább 2 tagot adj hozzá!'); return }
+    if (!householdId || !groupName.trim()) { setGroupError(copy.settings.groupNameRequired); return }
+    if (groupMemberIds.length < 2) { setGroupError(copy.settings.groupMinMembers); return }
     setGroupSaving(true); setGroupError(null)
     if (editGroup) {
       const { error } = await supabase.from('travel_group').update({ name: groupName.trim() }).eq('id', editGroup.id)
@@ -485,11 +491,11 @@ export function Beallitasok() {
 
   async function addBreakPeriod() {
     if (!householdId || !newBreakPersonId || !newBreakFrom || !newBreakTo) {
-      setBreakError('Töltsd ki az összes kötelező mezőt (személy, dátum)')
+      setBreakError(copy.settings.breakFields)
       return
     }
     if (newBreakFrom > newBreakTo) {
-      setBreakError('A kezdő dátum nem lehet nagyobb a végdátumnál')
+      setBreakError(copy.settings.breakOrder)
       return
     }
     setBreakSaving(true); setBreakError(null); setBreakMsg(null)
@@ -506,7 +512,7 @@ export function Beallitasok() {
     setBreakPeriods(bs => [bp, ...bs])
     // Apply: cancel occurrences in the range
     const { data: cnt } = await supabase.rpc('apply_break_period', { p_break_id: bp.id })
-    setBreakMsg(`✓ Szünet mentve — ${cnt ?? 0} alkalom lemondva`)
+    setBreakMsg(copy.settings.breakSaved(cnt ?? 0))
     setNewBreakOpen(false)
     setNewBreakPersonId(''); setNewBreakFrom(''); setNewBreakTo('')
     setNewBreakReason('vacation'); setNewBreakNote('')
@@ -514,7 +520,7 @@ export function Beallitasok() {
   }
 
   async function deleteBreakPeriod(bp: BreakPeriod) {
-    if (!confirm('Töröljük a szünetet? A törölt szünet emiatt lemondott alkalmak visszakerülnek tervezettbe.')) return
+    if (!confirm(copy.settings.confirmDeleteBreak)) return
     setBreakMsg(null)
     const { data: cnt } = await supabase.rpc('revert_break_period', {
       p_household_id: bp.household_id,
@@ -524,7 +530,7 @@ export function Beallitasok() {
     })
     await supabase.from('break_period').delete().eq('id', bp.id)
     setBreakPeriods(bs => bs.filter(b => b.id !== bp.id))
-    setBreakMsg(`↩ Szünet törölve — ${cnt ?? 0} alkalom visszaállítva`)
+    setBreakMsg(copy.settings.breakDeleted(cnt ?? 0))
   }
 
   // ── Diagnózis state ──────────────────────────────────────────────────────
@@ -552,7 +558,7 @@ export function Beallitasok() {
       }
       await runDiagnosis()
     } catch (e: unknown) {
-      alert('Javítási hiba: ' + (e instanceof Error ? e.message : String(e)))
+      alert(copy.settings.diagnoseFixError(e instanceof Error ? e.message : String(e)))
     }
     setFixingId(null)
   }
@@ -582,9 +588,9 @@ export function Beallitasok() {
       // ── 1. Nincs otthoni helyszín ──────────────────────────────────────
       const homeLoc = locs.find((l: Location) => l.is_home)
       if (!homeLoc) {
-        results.push({ id: 'no_home', severity: 'error', label: 'Nincs otthoni helyszín (is_home = true)' })
+        results.push({ id: 'no_home', severity: 'error', label: copy.settings.diagnose.noHome })
       } else {
-        results.push({ id: 'home_ok', severity: 'ok', label: `Otthoni helyszín: ${homeLoc.name}` })
+        results.push({ id: 'home_ok', severity: 'ok', label: copy.settings.diagnose.homeOk(homeLoc.name) })
       }
 
       // ── 2. Tervezett alkalmak leg nélkül ──────────────────────────────
@@ -600,12 +606,12 @@ export function Beallitasok() {
         o.status === 'planned' && (o.needs_dropoff || o.needs_pickup) && !legsByOcc.has(o.id as string)
       )
       if (plannedNoLeg.length === 0) {
-        results.push({ id: 'legs_ok', severity: 'ok', label: 'Minden tervezett alkalom rendelkezik transport leg-gel' })
+        results.push({ id: 'legs_ok', severity: 'ok', label: copy.settings.diagnose.ridesOk })
       } else {
         results.push({
           id: 'legs_missing', severity: 'warn',
-          label: `${plannedNoLeg.length} tervezett alkalom leg nélkül`,
-          detail: plannedNoLeg.slice(0, 5).map((o: Record<string, unknown>) => `${o.on_date} ${o.title}`).join(', ') + (plannedNoLeg.length > 5 ? '…' : ''),
+          label: copy.settings.diagnose.ridesMissing(plannedNoLeg.length),
+          detail: plannedNoLeg.slice(0, 5).map((o: Record<string, unknown>) => copy.settings.diagnose.item(formatShortDate(o.on_date as string), String(o.title))).join(', ') + (plannedNoLeg.length > 5 ? '…' : ''),
           fixable: true,
           fixIds: plannedNoLeg.map((o: Record<string, unknown>) => o.id as string),
         })
@@ -619,12 +625,12 @@ export function Beallitasok() {
         return (o.needs_dropoff && !e.dropoff) || (o.needs_pickup && !e.pickup)
       })
       if (incompleteLegs.length === 0) {
-        results.push({ id: 'legs_complete_ok', severity: 'ok', label: 'Leg irányok teljesek (dropoff/pickup)' })
+        results.push({ id: 'legs_complete_ok', severity: 'ok', label: copy.settings.diagnose.dirsOk })
       } else {
         results.push({
           id: 'legs_incomplete', severity: 'warn',
-          label: `${incompleteLegs.length} alkalom hiányos leg-iránnyal`,
-          detail: incompleteLegs.slice(0, 5).map((o: Record<string, unknown>) => `${o.on_date} ${o.title}`).join(', '),
+          label: copy.settings.diagnose.dirsIncomplete(incompleteLegs.length),
+          detail: incompleteLegs.slice(0, 5).map((o: Record<string, unknown>) => copy.settings.diagnose.item(formatShortDate(o.on_date as string), String(o.title))).join(', '),
           fixable: true,
           fixIds: incompleteLegs.map((o: Record<string, unknown>) => o.id as string),
         })
@@ -635,15 +641,15 @@ export function Beallitasok() {
         o.status === 'cancelled' && legsByOcc.has(o.id as string)
       )
       if (cancelledWithLegs.length === 0) {
-        results.push({ id: 'cancelled_ok', severity: 'ok', label: 'Lemondott alkalmakhoz nincs transport leg' })
+        results.push({ id: 'cancelled_ok', severity: 'ok', label: copy.settings.diagnose.cancelledOk })
       } else {
         const cancelledLegIds = legs
           .filter((l: Record<string, unknown>) => cancelledWithLegs.some((o: Record<string, unknown>) => o.id === l.occurrence_id))
           .map((l: Record<string, unknown>) => l.id as string)
         results.push({
           id: 'cancelled_legs', severity: 'error',
-          label: `${cancelledWithLegs.length} lemondott alkalom még rendelkezik leg-gel`,
-          detail: cancelledWithLegs.slice(0, 5).map((o: Record<string, unknown>) => `${o.on_date} ${o.title}`).join(', '),
+          label: copy.settings.diagnose.cancelledHasRides(cancelledWithLegs.length),
+          detail: cancelledWithLegs.slice(0, 5).map((o: Record<string, unknown>) => copy.settings.diagnose.item(formatShortDate(o.on_date as string), String(o.title))).join(', '),
           fixable: true,
           fixIds: cancelledLegIds,
         })
@@ -652,11 +658,11 @@ export function Beallitasok() {
       // ── 5. Leg sofőr nélkül ────────────────────────────────────────────
       const legNoDriver = legs.filter((l: Record<string, unknown>) => !l.driver_id)
       if (legNoDriver.length === 0) {
-        results.push({ id: 'driver_ok', severity: 'ok', label: 'Minden leg rendelkezik sofőrrel' })
+        results.push({ id: 'driver_ok', severity: 'ok', label: copy.settings.diagnose.driversOk })
       } else {
         results.push({
           id: 'driver_missing', severity: 'warn',
-          label: `${legNoDriver.length} leg sofőr nélkül`,
+          label: copy.settings.diagnose.driversMissing(legNoDriver.length),
         })
       }
 
@@ -664,11 +670,11 @@ export function Beallitasok() {
       const occIds = new Set(occs.map((o: Record<string, unknown>) => o.id as string))
       const orphanLegs = legs.filter((l: Record<string, unknown>) => !occIds.has(l.occurrence_id as string))
       if (orphanLegs.length === 0) {
-        results.push({ id: 'orphan_ok', severity: 'ok', label: 'Nincs árva transport leg' })
+        results.push({ id: 'orphan_ok', severity: 'ok', label: copy.settings.diagnose.orphanOk })
       } else {
         results.push({
           id: 'orphan_legs', severity: 'error',
-          label: `${orphanLegs.length} árva transport leg (ismeretlen occurrence_id)`,
+          label: copy.settings.diagnose.orphanRides(orphanLegs.length),
           fixable: true,
           fixIds: orphanLegs.map((l: Record<string, unknown>) => l.id as string),
         })
@@ -686,11 +692,11 @@ export function Beallitasok() {
         }
       }
       if (overlapCount === 0) {
-        results.push({ id: 'tpl_overlap_ok', severity: 'ok', label: 'Sablon dátumok nem fedik át egymást' })
+        results.push({ id: 'tpl_overlap_ok', severity: 'ok', label: copy.settings.diagnose.overlapOk })
       } else {
         results.push({
           id: 'tpl_overlap', severity: 'error',
-          label: `${overlapCount} sablon dátum-átfedés (azonos személy + hét napja)`,
+          label: copy.settings.diagnose.overlap(overlapCount),
         })
       }
 
@@ -704,15 +710,15 @@ export function Beallitasok() {
           const loc = locs.find((l: Location) => l.id === locId)
           if (loc?.is_tbd) continue  // TBD helyszínnek sosem lesz ismert útideje
           const name = loc?.name ?? locId
-          if (!ttSet.has(`${homeLoc.id}→${locId}`)) missingRoutes.push(`Otthon→${name}`)
-          if (!ttSet.has(`${locId}→${homeLoc.id}`)) missingRoutes.push(`${name}→Otthon`)
+          if (!ttSet.has(`${homeLoc.id}→${locId}`)) missingRoutes.push(copy.settings.diagnose.homeTo(name))
+          if (!ttSet.has(`${locId}→${homeLoc.id}`)) missingRoutes.push(copy.settings.diagnose.toHome(name))
         }
         if (missingRoutes.length === 0) {
-          results.push({ id: 'tt_ok', severity: 'ok', label: 'Minden sablon-helyszínhez van útidő (oda+vissza)' })
+          results.push({ id: 'tt_ok', severity: 'ok', label: copy.settings.diagnose.travelOk })
         } else {
           results.push({
             id: 'tt_missing', severity: 'warn',
-            label: `Hiányzó útidők: ${missingRoutes.join(', ')}`,
+            label: copy.settings.diagnose.travelMissing(missingRoutes.join(', ')),
           })
         }
       }
@@ -722,12 +728,12 @@ export function Beallitasok() {
         o.starts_at && o.ends_at && (o.starts_at as string) >= (o.ends_at as string)
       )
       if (badTimes.length === 0) {
-        results.push({ id: 'times_ok', severity: 'ok', label: 'Minden alkalom időtartama helyes (starts_at < ends_at)' })
+        results.push({ id: 'times_ok', severity: 'ok', label: copy.settings.diagnose.timesOk })
       } else {
         results.push({
           id: 'times_bad', severity: 'error',
-          label: `${badTimes.length} alkalom hibás időtartammal (starts_at >= ends_at)`,
-          detail: badTimes.slice(0, 3).map((o: Record<string, unknown>) => `${o.on_date} ${o.title} ${o.starts_at}–${o.ends_at}`).join(', '),
+          label: copy.settings.diagnose.timesBad(badTimes.length),
+          detail: badTimes.slice(0, 3).map((o: Record<string, unknown>) => copy.settings.diagnose.item(formatShortDate(o.on_date as string), String(o.title))).join(', '),
         })
       }
 
@@ -738,12 +744,12 @@ export function Beallitasok() {
         id: 'summary',
         severity: errCount > 0 ? 'error' : warnCount > 0 ? 'warn' : 'ok',
         label: errCount === 0 && warnCount === 0
-          ? `✅ Minden ellenőrzés sikeres (${occs.length} alkalom, ${legs.length} leg, ${tpls.length} sablon)`
-          : `${errCount} hiba · ${warnCount} figyelmeztetés (${occs.length} alkalom, ${legs.length} leg)`,
+          ? copy.settings.diagnose.summaryOk(occs.length, legs.length, tpls.length)
+          : copy.settings.diagnose.summaryIssues(errCount, warnCount, occs.length, legs.length),
       })
 
     } catch (e: unknown) {
-      results.push({ id: 'fetch_error', severity: 'error', label: 'Lekérési hiba: ' + (e instanceof Error ? e.message : String(e)) })
+      results.push({ id: 'fetch_error', severity: 'error', label: copy.settings.diagnoseFetchError(e instanceof Error ? e.message : String(e)) })
     }
 
     setDiagResults(results)
@@ -752,20 +758,19 @@ export function Beallitasok() {
 
   return (
     <div style={{ background: 'var(--color-bg)', minHeight: '100dvh' }}>
-      <Header title="Beállítások" />
+      <Header title={copy.settings.title} />
 
-      {/* ── Megjelenítés ── */}
       <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--color-border)' }}>
-        <div className="section-label" style={{ marginBottom: 10 }}>Megjelenítés</div>
+        <div className="section-label" style={{ marginBottom: 10 }}>{copy.settings.appearance}</div>
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '10px 14px', borderRadius: 'var(--r-md)',
           background: 'var(--color-surface)', border: '1px solid var(--color-border)',
         }}>
           <div>
-            <div style={{ fontSize: 13, fontWeight: 500 }}>Elmaradt események elrejtése</div>
+            <div style={{ fontSize: 13, fontWeight: 500 }}>{copy.settings.hideCancelled}</div>
             <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2 }}>
-              Hét és Fuvartábla nézetben nem jelenik meg az ELMARAD
+              {copy.settings.hideCancelledHint}
             </div>
           </div>
           <button
@@ -794,9 +799,9 @@ export function Beallitasok() {
             background: 'var(--color-surface)', border: '1px solid var(--color-border)',
           }}>
             <div>
-              <div style={{ fontSize: 13, fontWeight: 500 }}>Push értesítések</div>
+              <div style={{ fontSize: 13, fontWeight: 500 }}>{copy.settings.push}</div>
               <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2 }}>
-                Értesítés sofőr-hozzárendeléskor
+                {copy.settings.pushHint}
               </div>
             </div>
             <button
@@ -846,7 +851,7 @@ export function Beallitasok() {
         {tab === 'helyszin' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <p style={{ fontSize: 12, color: 'var(--color-muted)', margin: '0 0 4px' }}>
-              Az utazási idő mátrix alapjai. Az „otthon" jelölés kötelező a fuvarszámításhoz.
+              {copy.settings.locationsHint}
             </p>
 
             {locError && (
@@ -863,20 +868,20 @@ export function Beallitasok() {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <input style={inp} value={editLocName}
                       onChange={e => setEditLocName(e.target.value)}
-                      placeholder="Név" />
+                      placeholder={copy.settings.name} />
                     <input style={inp} value={editLocAddr}
                       onChange={e => setEditLocAddr(e.target.value)}
-                      placeholder="Cím (opcionális)" />
+                      placeholder={copy.settings.address} />
                     <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
                       <input type="checkbox" checked={editLocTbd}
                         onChange={e => setEditLocTbd(e.target.checked)} />
-                      📍? TBD helyszín
+                      {copy.settings.tbdLabel}
                     </label>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button style={btnPrimary} disabled={locSaving} onClick={saveLoc}>
-                        {locSaving ? '…' : 'Mentés'}
+                        {locSaving ? copy.common.working : copy.common.save}
                       </button>
-                      <button style={btnGhost} onClick={() => setEditLocId(null)}>Mégse</button>
+                      <button style={btnGhost} onClick={() => setEditLocId(null)}>{copy.common.cancel}</button>
                     </div>
                   </div>
                 ) : (
@@ -885,11 +890,11 @@ export function Beallitasok() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         {loc.is_home && (
                           <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 6,
-                                         background: '#1e3a5f', color: '#93c5fd' }}>Otthon</span>
+                                         background: '#1e3a5f', color: '#93c5fd' }}>{copy.common.home}</span>
                         )}
                         {loc.is_tbd && (
                           <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 6,
-                                         background: '#3d2e00', color: '#fbbf24' }}>📍?</span>
+                                         background: '#3d2e00', color: '#fbbf24' }}>{copy.status.locationMissing}</span>
                         )}
                         <span style={{ fontSize: 13, fontWeight: 500 }}>{loc.name}</span>
                       </div>
@@ -900,10 +905,11 @@ export function Beallitasok() {
                       )}
                     </div>
                     <div style={{ display: 'flex', gap: 6 }}>
-                      <button style={btnGhost} onClick={() => startEditLoc(loc)}>✎</button>
+                      <button style={btnGhost} onClick={() => startEditLoc(loc)} aria-label={copy.a11y.edit}><Icon name="pencil" size={14} /></button>
                       <button style={btnDanger} disabled={loc.is_home}
-                        title={loc.is_home ? 'Az otthon helyszín nem törölhető' : ''}
-                        onClick={() => deleteLoc(loc.id)}>🗑</button>
+                        title={loc.is_home ? copy.settings.homeCannotDelete : ''}
+                        aria-label={copy.a11y.delete}
+                        onClick={() => deleteLoc(loc.id)}><Icon name="trash" size={14} /></button>
                     </div>
                   </div>
                 )}
@@ -918,36 +924,36 @@ export function Beallitasok() {
                 display: 'flex', flexDirection: 'column', gap: 8,
               }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-blue)' }}>
-                  Új helyszín
+                  {copy.settings.newLocation}
                 </div>
                 <input style={inp} value={newLocName}
                   onChange={e => setNewLocName(e.target.value)}
-                  placeholder="Név *" />
+                  placeholder={copy.settings.nameRequired} />
                 <input style={inp} value={newLocAddr}
                   onChange={e => setNewLocAddr(e.target.value)}
-                  placeholder="Cím (opcionális)" />
+                  placeholder={copy.settings.address} />
                 <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
                   <input type="checkbox" checked={newLocHome}
                     onChange={e => setNewLocHome(e.target.checked)} />
-                  Ez az otthon
+                  {copy.settings.isHome}
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
                   <input type="checkbox" checked={newLocTbd}
                     onChange={e => setNewLocTbd(e.target.checked)} />
-                  📍? TBD helyszín
+                  {copy.settings.tbdLabel}
                 </label>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button style={btnPrimary} disabled={locSaving || !newLocName.trim()} onClick={addLoc}>
-                    {locSaving ? '…' : 'Hozzáad'}
+                    {locSaving ? copy.common.working : copy.common.add}
                   </button>
-                  <button style={btnGhost} onClick={() => { setNewLocOpen(false); setLocError(null) }}>Mégse</button>
+                  <button style={btnGhost} onClick={() => { setNewLocOpen(false); setLocError(null) }}>{copy.common.cancel}</button>
                 </div>
               </div>
             ) : (
               <button onClick={() => setNewLocOpen(true)} style={{
                 ...btnGhost, width: '100%', borderStyle: 'dashed', borderColor: 'var(--color-blue)',
                 color: 'var(--color-blue)', fontSize: 13,
-              }}>+ Új helyszín</button>
+              }}>{copy.settings.newLocation}</button>
             )}
           </div>
         )}
@@ -958,7 +964,7 @@ export function Beallitasok() {
         {tab === 'utido' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <p style={{ fontSize: 12, color: 'var(--color-muted)', margin: '0 0 4px' }}>
-              Kézzel felvett menetidők percben. Kattints a percszámra a szerkesztéshez.
+              {copy.settings.travelHint}
             </p>
 
             {ttError && (
@@ -972,11 +978,11 @@ export function Beallitasok() {
                   <tr style={{ background: 'var(--color-surface)',
                                 borderBottom: '1px solid var(--color-border)' }}>
                     <th style={{ textAlign: 'left', padding: '8px 12px', fontSize: 11,
-                                  color: 'var(--color-muted)', fontWeight: 500 }}>Honnan</th>
+                                  color: 'var(--color-muted)', fontWeight: 500 }}>{copy.settings.travelFrom}</th>
                     <th style={{ textAlign: 'left', padding: '8px 12px', fontSize: 11,
-                                  color: 'var(--color-muted)', fontWeight: 500 }}>Hová</th>
+                                  color: 'var(--color-muted)', fontWeight: 500 }}>{copy.settings.travelTo}</th>
                     <th style={{ textAlign: 'right', padding: '8px 12px', fontSize: 11,
-                                  color: 'var(--color-muted)', fontWeight: 500 }}>Perc</th>
+                                  color: 'var(--color-muted)', fontWeight: 500 }}>{copy.settings.travelMins}</th>
                     <th style={{ width: 40 }} />
                   </tr>
                 </thead>
@@ -1013,7 +1019,7 @@ export function Beallitasok() {
                         </td>
                         <td style={{ padding: '6px 8px', textAlign: 'center' }}>
                           <button style={{ ...btnDanger, padding: '4px 8px', fontSize: 12 }}
-                            onClick={() => deleteTT(tt.from_location, tt.to_location)}>🗑</button>
+                            onClick={() => deleteTT(tt.from_location, tt.to_location)} aria-label={copy.a11y.delete}><Icon name="trash" size={14} /></button>
                         </td>
                       </tr>
                     )
@@ -1021,7 +1027,7 @@ export function Beallitasok() {
                   {travelTimes.length === 0 && (
                     <tr><td colSpan={4} style={{ padding: '24px 12px', textAlign: 'center',
                                                   fontSize: 12, color: 'var(--color-muted)' }}>
-                      Még nincs menetidő megadva.
+                      {copy.settings.travelEmpty}
                     </td></tr>
                   )}
                 </tbody>
@@ -1035,33 +1041,33 @@ export function Beallitasok() {
                 background: 'var(--color-surface)', border: '1px dashed var(--color-blue)',
                 display: 'flex', flexDirection: 'column', gap: 8,
               }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-blue)' }}>Új útvonal</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-blue)' }}>{copy.settings.newRoute}</div>
                 <select style={inp} value={newTTFrom} onChange={e => setNewTTFrom(e.target.value)}>
-                  <option value="">Honnan…</option>
+                  <option value="">{copy.settings.travelFromPick}</option>
                   {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
                 </select>
                 <select style={inp} value={newTTTo} onChange={e => setNewTTTo(e.target.value)}>
-                  <option value="">Hová…</option>
+                  <option value="">{copy.settings.travelToPick}</option>
                   {locations.filter(l => l.id !== newTTFrom).map(l =>
                     <option key={l.id} value={l.id}>{l.name}</option>)}
                 </select>
                 <input style={{ ...inp, width: 120 }} type="number" min={1}
                   value={newTTMin} onChange={e => setNewTTMin(e.target.value)}
-                  placeholder="Percek" />
+                  placeholder={copy.settings.minutesPlaceholder} />
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button style={btnPrimary}
                     disabled={ttSaving || !newTTFrom || !newTTTo || !newTTMin}
                     onClick={addTT}>
-                    {ttSaving ? '…' : 'Hozzáad'}
+                    {ttSaving ? copy.common.working : copy.common.add}
                   </button>
-                  <button style={btnGhost} onClick={() => { setNewTTOpen(false); setTTError(null) }}>Mégse</button>
+                  <button style={btnGhost} onClick={() => { setNewTTOpen(false); setTTError(null) }}>{copy.common.cancel}</button>
                 </div>
               </div>
             ) : (
               <button onClick={() => setNewTTOpen(true)} style={{
                 ...btnGhost, width: '100%', borderStyle: 'dashed', borderColor: 'var(--color-blue)',
                 color: 'var(--color-blue)', fontSize: 13,
-              }}>+ Új útvonal</button>
+              }}>{copy.settings.newRoute}</button>
             )}
           </div>
         )}
@@ -1072,7 +1078,7 @@ export function Beallitasok() {
         {tab === 'elerheto' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <p style={{ fontSize: 12, color: 'var(--color-muted)', margin: '0 0 4px' }}>
-              Mikor tud vezetni az adott sofőr. Figyelmeztető — nem tiltja a beosztást.
+              {copy.settings.availHint}
             </p>
 
             {availError && (
@@ -1090,7 +1096,7 @@ export function Beallitasok() {
                   <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>
                     {driver.display_name}
                   </div>
-                  {WEEKDAYS.map((day, i) => {
+                  {copy.weekday.long.map((_day, i) => {
                     const weekday = i + 1
                     const slots = avails.filter(a => a.weekday === weekday)
                     const isAdding = newSlot?.personId === driver.id && newSlot?.weekday === weekday
@@ -1099,7 +1105,7 @@ export function Beallitasok() {
                                              gap: 6, padding: '5px 0',
                                              borderTop: i > 0 ? '1px solid var(--color-border)' : 'none' }}>
                         <span style={{ fontSize: 12, width: 60, flexShrink: 0,
-                                        color: 'var(--color-muted)' }}>{day.slice(0, 4)}</span>
+                                        color: 'var(--color-muted)' }}>{copy.weekday.mid[i]}</span>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, flex: 1 }}>
                           {slots.map(s => (
                             <span key={s.id} style={{
@@ -1129,10 +1135,10 @@ export function Beallitasok() {
                               style={{ ...inp, width: 90, padding: '4px 6px' }} />
                             <button style={{ ...btnPrimary, padding: '4px 10px' }}
                               disabled={availSaving} onClick={addAvail}>
-                              {availSaving ? '…' : '✓'}
+                              {availSaving ? copy.common.working : <Icon name="check" size={14} weight="bold" />}
                             </button>
                             <button style={{ ...btnGhost, padding: '4px 8px' }}
-                              onClick={() => { setNewSlot(null); setAvailError(null) }}>✕</button>
+                              onClick={() => { setNewSlot(null); setAvailError(null) }} aria-label={copy.a11y.close}><Icon name="x" size={14} /></button>
                           </div>
                         ) : (
                           <button onClick={() => {
@@ -1154,7 +1160,7 @@ export function Beallitasok() {
 
             {drivers.length === 0 && (
               <p style={{ fontSize: 13, textAlign: 'center', padding: '32px 0',
-                           color: 'var(--color-muted)' }}>Nincs sofőr a háztartásban.</p>
+                           color: 'var(--color-muted)' }}>{copy.settings.noDrivers}</p>
             )}
           </div>
         )}
@@ -1165,15 +1171,14 @@ export function Beallitasok() {
         {tab === 'nem_elerheto' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <p style={{ fontSize: 12, color: 'var(--color-muted)', margin: '0 0 4px' }}>
-              Mikor <strong>nem</strong> elérhető az adott személy. Minden más időpont szabad.
-              Figyelmeztető — nem tiltja a beosztást automatikusan.
+              {copy.settings.unavailHint}
             </p>
             {unavailError && (
               <div style={{ fontSize: 12, color: '#fca5a5', padding: '6px 10px',
                             background: '#450a0a', borderRadius: 8 }}>{unavailError}</div>
             )}
             {unavailLoading && (
-              <div style={{ fontSize: 13, color: 'var(--color-muted)', textAlign: 'center', padding: 24 }}>Betöltés…</div>
+              <div style={{ fontSize: 13, color: 'var(--color-muted)', textAlign: 'center', padding: 24 }}>{copy.common.loading}</div>
             )}
             {!unavailLoading && persons.map(person => {
               const blocks = unavailBlocks.filter(b => b.person_id === person.id)
@@ -1191,17 +1196,17 @@ export function Beallitasok() {
                     <span style={{ fontSize: 13, fontWeight: 600 }}>{person.display_name}</span>
                     <span style={{ fontSize: 11, color: 'var(--color-muted)', marginLeft: 2,
                       background: 'var(--color-surface-2)', padding: '1px 6px', borderRadius: 8 }}>
-                      {person.role}
+                      {copy.role[person.role as PersonRole]}
                     </span>
                   </div>
-                  {WEEKDAYS.map((day, i) => {
+                  {copy.weekday.long.map((_day, i) => {
                     const weekday = i
                     const slots = blocks.filter(b => b.weekday === weekday)
                     const isAdding = newUnavail?.personId === person.id && newUnavail?.weekday === weekday
                     return (
                       <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 0',
                                              borderTop: i > 0 ? '1px solid var(--color-border)' : 'none' }}>
-                        <span style={{ fontSize: 12, width: 60, flexShrink: 0, color: 'var(--color-muted)' }}>{day.slice(0,4)}</span>
+                        <span style={{ fontSize: 12, width: 60, flexShrink: 0, color: 'var(--color-muted)' }}>{copy.weekday.mid[i]}</span>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, flex: 1 }}>
                           {slots.map(s => (
                             <span key={s.id} style={{
@@ -1229,16 +1234,16 @@ export function Beallitasok() {
                             <input type="time" value={newUnavailTo}
                               onChange={e => setNewUnavailTo(e.target.value)}
                               style={{ ...inp, width: 90, padding: '4px 6px' }} />
-                            <input placeholder="Megjegyzés (opcionális)"
+                            <input placeholder={copy.settings.noteOptional}
                               value={newUnavailLabel}
                               onChange={e => setNewUnavailLabel(e.target.value)}
                               style={{ ...inp, width: 140, padding: '4px 6px', fontSize: 11 }} />
                             <button style={{ ...btnPrimary, padding: '4px 10px' }}
                               disabled={unavailSaving} onClick={addUnavailBlock}>
-                              {unavailSaving ? '…' : '✓'}
+                              {unavailSaving ? copy.common.working : <Icon name="check" size={14} weight="bold" />}
                             </button>
                             <button style={{ ...btnGhost, padding: '4px 8px' }}
-                              onClick={() => { setNewUnavail(null); setUnavailError(null) }}>✕</button>
+                              onClick={() => { setNewUnavail(null); setUnavailError(null) }} aria-label={copy.a11y.close}><Icon name="x" size={14} /></button>
                           </div>
                         ) : (
                           <button onClick={() => {
@@ -1259,7 +1264,7 @@ export function Beallitasok() {
               )
             })}
             {persons.length === 0 && (
-              <p style={{ fontSize: 13, textAlign: 'center', padding: '32px 0', color: 'var(--color-muted)' }}>Nincs személy a háztartásban.</p>
+              <p style={{ fontSize: 13, textAlign: 'center', padding: '32px 0', color: 'var(--color-muted)' }}>{copy.settings.noPersons}</p>
             )}
           </div>
         )}
@@ -1282,14 +1287,14 @@ export function Beallitasok() {
                 Google Calendar
               </div>
               <p style={{ fontSize: 12, color: 'var(--color-muted)', margin: '0 0 10px' }}>
-                Szülők csatlakoztatják saját Google-fiókjukat. A hozzárendelt fuvarok automatikusan megjelennek a Google Calendarban, a Google-eseményeket pedig ütközésvizsgálatra használjuk.
+                {copy.settings.googleHint}
               </p>
 
               {googleMsg && (
                 <div style={{
                   padding: '8px 12px', borderRadius: 8, marginBottom: 10, fontSize: 12,
-                  background: googleMsg.startsWith('✓') ? '#14532d' : '#78350f',
-                  color:      googleMsg.startsWith('✓') ? '#4ade80'  : '#fbbf24',
+                  background: googleOk ? '#14532d' : '#78350f',
+                  color:      googleOk ? '#4ade80'  : '#fbbf24',
                 }}>
                   {googleMsg}
                 </div>
@@ -1318,11 +1323,11 @@ export function Beallitasok() {
                             <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 1 }}>
                               {gcal.display_name}
                               {gcal.last_synced_at && (
-                                <> · {format(new Date(gcal.last_synced_at), 'MMM d HH:mm')}</>
+                                <> · {formatDateTime(gcal.last_synced_at)}</>
                               )}
                             </div>
                           ) : (
-                            <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 1 }}>Nincs csatlakoztatva</div>
+                            <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 1 }}>{copy.settings.googleNotConnected}</div>
                           )}
                         </div>
                       </div>
@@ -1337,25 +1342,27 @@ export function Beallitasok() {
                                 if (ok) {
                                   const updated = await fetchGoogleCalendars(householdId!)
                                   setGoogleCals(updated)
-                                  setGoogleMsg('✓ Szinkronizálva!')
+                                  setGoogleMsg(copy.settings.googleSynced)
+                                  setGoogleOk(true)
                                   setTimeout(() => setGoogleMsg(null), 3000)
                                 }
                               }}
                               disabled={syncing}
                               style={{ ...btnGhost, fontSize: 11, padding: '4px 10px' }}
                             >
-                              {syncing ? '…' : '↻ Szinkron'}
+                              {syncing ? copy.common.working : copy.settings.googleSync}
                             </button>
                             <button
                               onClick={async () => {
-                                if (!confirm(`Lecsatlakoztatod ${parent.display_name} Google Calendarját?`)) return
+                                if (!confirm(copy.settings.confirmDisconnectGoogle(parent.display_name))) return
                                 await disconnectGoogle(parent.id)
                                 setGoogleCals(prev => prev.filter(c => c.person_id !== parent.id))
-                                setGoogleMsg('Google Calendar lecsatlakoztatva.')
+                                setGoogleMsg(copy.settings.googleDisconnected)
+                                setGoogleOk(false)
                               }}
                               style={{ ...btnDanger, fontSize: 11, padding: '4px 10px' }}
                             >
-                              Lecsatlakoztatás
+                              {copy.settings.googleDisconnect}
                             </button>
                           </>
                         ) : (
@@ -1363,7 +1370,7 @@ export function Beallitasok() {
                             onClick={() => householdId && startGoogleAuth(parent.id, householdId)}
                             style={{ ...btnPrimary, fontSize: 11, padding: '4px 12px', background: '#4285f4' }}
                           >
-                            Csatlakoztatás
+                            {copy.settings.googleConnect}
                           </button>
                         )}
                       </div>
@@ -1376,7 +1383,7 @@ export function Beallitasok() {
             {/* Meglévő naptárak (ICS stb.) */}
             {extCals.filter(c => c.source !== 'google').length > 0 && (
               <div>
-                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Egyéb naptárak</div>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>{copy.settings.otherCalendars}</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {extCals.filter(c => c.source !== 'google').map(cal => {
                     const owner = persons.find(p => p.id === cal.person_id)
@@ -1414,14 +1421,14 @@ export function Beallitasok() {
         {tab === 'csoportok' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <p style={{ fontSize: 12, color: 'var(--color-muted)', margin: '0 0 4px' }}>
-              Fuvar-csoportok: egyszerre több személyt lehet hozzárendelni egy fuvarmenethez.
+              {copy.settings.groupHint}
             </p>
 
             {groupsLoading ? (
-              <div style={{ textAlign: 'center', padding: 24, color: 'var(--color-muted)', fontSize: 13 }}>Betöltés…</div>
+              <div style={{ textAlign: 'center', padding: 24, color: 'var(--color-muted)', fontSize: 13 }}>{copy.common.loading}</div>
             ) : groups.length === 0 && !groupFormOpen ? (
               <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--color-muted)', fontSize: 13 }}>
-                Még nincs csoport. Hozz létre egyet!
+                {copy.settings.groupEmpty}
               </div>
             ) : (
               groups.map(g => (
@@ -1431,20 +1438,22 @@ export function Beallitasok() {
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
                 }}>
                   <div>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>👥 {g.name}</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Icon name="users-three" size={16} /> {g.name}
+                    </div>
                     <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                       {g.members.map(m => {
                         const p = persons.find(pp => pp.id === m.person_id)
                         return p ? (
                           <span key={m.person_id} style={{
                             padding: '1px 6px', borderRadius: 4, fontSize: 11,
-                            background: p.color + '22', color: p.color, fontWeight: 600,
+                            background: p.color + '22', color: 'var(--color-text-2)', fontWeight: 600,
                           }}>{p.display_name}</span>
                         ) : null
                       })}
                     </div>
                   </div>
-                  <button style={btnGhost} onClick={() => openEditGroup(g)}>✎</button>
+                  <button style={btnGhost} onClick={() => openEditGroup(g)} aria-label={copy.a11y.edit}><Icon name="pencil" size={14} /></button>
                 </div>
               ))
             )}
@@ -1456,13 +1465,13 @@ export function Beallitasok() {
                 display: 'flex', flexDirection: 'column', gap: 10,
               }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--color-blue)' }}>
-                  {editGroup ? 'Csoport szerkesztése' : 'Új csoport'}
+                  {editGroup ? copy.settings.groupEdit : copy.settings.groupNew}
                 </div>
                 <input style={inp} value={groupName}
                   onChange={e => setGroupName(e.target.value)}
-                  placeholder="Csoport neve *" />
+                  placeholder={copy.settings.groupName} />
                 <div>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Tagok</div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{copy.common.members}</div>
                   {persons.map(p => (
                     <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 4, cursor: 'pointer' }}>
                       <input type="checkbox"
@@ -1480,17 +1489,19 @@ export function Beallitasok() {
                 )}
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <button style={btnPrimary} disabled={groupSaving} onClick={saveGroup}>
-                    {groupSaving ? '…' : editGroup ? 'Mentés' : 'Létrehozás'}
+                    {groupSaving ? copy.common.working : editGroup ? copy.common.save : copy.common.create}
                   </button>
-                  <button style={btnGhost} onClick={() => { setGroupFormOpen(false); setGroupError(null) }}>Mégse</button>
+                  <button style={btnGhost} onClick={() => { setGroupFormOpen(false); setGroupError(null) }}>{copy.common.cancel}</button>
                   {editGroup && (
                     groupDeleteConfirm === editGroup.id ? (
                       <>
-                        <button style={btnDanger} onClick={() => deleteGroup(editGroup.id)}>Igen, törlöm</button>
-                        <button style={btnGhost} onClick={() => setGroupDeleteConfirm(null)}>Mégsem</button>
+                        <button style={btnDanger} onClick={() => deleteGroup(editGroup.id)}>{copy.common.yesDelete}</button>
+                        <button style={btnGhost} onClick={() => setGroupDeleteConfirm(null)}>{copy.common.cancel}</button>
                       </>
                     ) : (
-                      <button style={btnDanger} onClick={() => setGroupDeleteConfirm(editGroup.id)}>🗑 Törlés</button>
+                      <button style={btnDanger} onClick={() => setGroupDeleteConfirm(editGroup.id)} aria-label={copy.a11y.delete}>
+                        <Icon name="trash" size={14} /> {copy.common.delete}
+                      </button>
                     )
                   )}
                 </div>
@@ -1499,7 +1510,7 @@ export function Beallitasok() {
               <button onClick={openNewGroup} style={{
                 ...btnGhost, width: '100%', borderStyle: 'dashed', borderColor: 'var(--color-blue)',
                 color: 'var(--color-blue)', fontSize: 13,
-              }}>+ Új csoport</button>
+              }}>{copy.settings.groupNew}</button>
             )}
           </div>
         )}
@@ -1507,28 +1518,28 @@ export function Beallitasok() {
         {tab === 'push' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <p style={{ fontSize: 12, color: 'var(--color-muted)', margin: '0 0 4px' }}>
-              Küldj egyedi push értesítést a háztartás tagjainak.
+              {copy.settings.pushCustomHint}
             </p>
             <div>
-              <label style={{ fontSize: 12, color: 'var(--color-muted)', display: 'block', marginBottom: 4 }}>Cím *</label>
+              <label style={{ fontSize: 12, color: 'var(--color-muted)', display: 'block', marginBottom: 4 }}>{copy.settings.pushTitleLabel}</label>
               <input value={pushTitle} onChange={e => setPushTitle(e.target.value)}
-                placeholder="pl. Változás a mai napon" style={{ ...inp }} maxLength={80} />
+                placeholder={copy.settings.pushPlaceholder} style={{ ...inp }} maxLength={80} />
             </div>
             <div>
-              <label style={{ fontSize: 12, color: 'var(--color-muted)', display: 'block', marginBottom: 4 }}>Szöveg (opcionális)</label>
+              <label style={{ fontSize: 12, color: 'var(--color-muted)', display: 'block', marginBottom: 4 }}>{copy.settings.pushBodyLabel}</label>
               <textarea value={pushBody} onChange={e => setPushBody(e.target.value)}
-                placeholder="Részletek…" rows={3}
+                placeholder={copy.settings.pushBody} rows={3}
                 style={{ ...inp, resize: 'vertical', fontFamily: 'inherit' }} maxLength={200} />
             </div>
             <div>
-              <label style={{ fontSize: 12, color: 'var(--color-muted)', display: 'block', marginBottom: 6 }}>Küldés kinek</label>
+              <label style={{ fontSize: 12, color: 'var(--color-muted)', display: 'block', marginBottom: 6 }}>{copy.settings.pushWho}</label>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 <button onClick={() => setPushTargetIds([])} style={{
                   padding: '5px 12px', borderRadius: 20, fontSize: 12, cursor: 'pointer',
                   border: '1px solid var(--color-border)',
                   background: pushTargetIds.length === 0 ? 'var(--color-blue)' : 'transparent',
                   color: pushTargetIds.length === 0 ? '#fff' : 'var(--color-muted)',
-                }}>Mindenki</button>
+                }}>{copy.common.everyone}</button>
                 {persons.map(p => {
                   const sel = pushTargetIds.includes(p.id)
                   return (
@@ -1539,7 +1550,7 @@ export function Beallitasok() {
                         padding: '5px 12px', borderRadius: 20, fontSize: 12, cursor: 'pointer',
                         border: `1px solid ${sel ? p.color : 'var(--color-border)'}`,
                         background: sel ? `${p.color}22` : 'transparent',
-                        color: sel ? p.color : 'var(--color-muted)',
+                        color: sel ? 'var(--color-text)' : 'var(--color-muted)',
                       }}>
                       <span style={{ width: 14, height: 14, borderRadius: '50%', background: p.color,
                         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -1553,24 +1564,24 @@ export function Beallitasok() {
             <button onClick={sendCustomPush} disabled={pushSending || !pushTitle.trim()}
               style={{ ...btnPrimary, width: '100%', padding: '12px 0', fontSize: 14, fontWeight: 700,
                 opacity: !pushTitle.trim() ? 0.5 : 1, cursor: !pushTitle.trim() ? 'not-allowed' : 'pointer' }}>
-              {pushSending ? '📤 Küldés…' : '📣 Push küldése'}
+              {pushSending ? copy.settings.pushSending : copy.settings.pushSend}
             </button>
             {pushResult && (
               <div style={{ fontSize: 13, padding: '8px 12px', borderRadius: 8, textAlign: 'center',
-                background: pushResult.startsWith('✓') ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
-                border: `1px solid ${pushResult.startsWith('✓') ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`,
-                color: pushResult.startsWith('✓') ? '#4ade80' : '#fca5a5' }}>
+                background: pushOk ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
+                border: `1px solid ${pushOk ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`,
+                color: pushOk ? '#4ade80' : '#fca5a5' }}>
                 {pushResult}
               </div>
             )}
 
             {/* ── Előzmények ── */}
             <div style={{ marginTop: 20 }}>
-              <div className="section-label">Előzmények</div>
+              <div className="section-label">{copy.common.history}</div>
               {pushLogsLoading ? (
-                <div style={{ textAlign: 'center', padding: 16, color: 'var(--color-muted)', fontSize: 12 }}>Betöltés…</div>
+                <div style={{ textAlign: 'center', padding: 16, color: 'var(--color-muted)', fontSize: 12 }}>{copy.common.loading}</div>
               ) : pushLogs.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: 16, color: 'var(--color-muted)', fontSize: 12 }}>Még nem volt küldés.</div>
+                <div style={{ textAlign: 'center', padding: 16, color: 'var(--color-muted)', fontSize: 12 }}>{copy.settings.pushEmptyLogs}</div>
               ) : pushLogs.map(log => (
                 <div key={log.id} style={{
                   borderRadius: 10, padding: '9px 12px', marginBottom: 6,
@@ -1578,10 +1589,10 @@ export function Beallitasok() {
                 }}>
                   <div style={{ fontSize: 12, fontWeight: 600 }}>{log.title}</div>
                   <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2 }}>
-                    {format(new Date(log.sent_at), 'MM.dd HH:mm')}
-                    {' · '}✉️ {log.sent_count}/{log.target_count} küldve
-                    {' · '}📬 {log.delivered_count ?? 0} megérkezett
-                    {' · '}👆 {log.clicked_count ?? 0} megnyitva
+                    {formatDateTime(log.sent_at)}
+                    {' · '}{copy.settings.pushLogSent(log.sent_count, log.target_count)}
+                    {' · '}{copy.settings.pushLogDelivered(log.delivered_count ?? 0)}
+                    {' · '}{copy.settings.pushLogOpened(log.clicked_count ?? 0)}
                   </div>
                 </div>
               ))}
@@ -1596,8 +1607,7 @@ export function Beallitasok() {
         {tab === 'szunetek' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <p style={{ fontSize: 12, color: 'var(--color-muted)', margin: '0 0 4px' }}>
-              Szünet-időszak megadásával az adott személy összes eseménye automatikusan lemondásra kerül a megjelölt napokra.
-              Törléskor a sablon-alapú alkalmak visszakerülnek „tervezett" státuszba.
+              {copy.settings.breakHint}
             </p>
 
             {breakMsg && (
@@ -1616,7 +1626,7 @@ export function Beallitasok() {
             {/* Új szünet */}
             {!newBreakOpen ? (
               <button style={btnPrimary} onClick={() => { setNewBreakOpen(true); setBreakError(null); setBreakMsg(null) }}>
-                + Új szünet hozzáadása
+                {copy.settings.breakAdd}
               </button>
             ) : (
               <div style={{
@@ -1625,14 +1635,14 @@ export function Beallitasok() {
                 display: 'flex', flexDirection: 'column', gap: 10,
               }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  Új szünet-időszak
+                  {copy.settings.breakNew}
                 </div>
 
                 {/* Személy */}
                 <div>
-                  <div style={{ fontSize: 12, color: 'var(--color-muted)', marginBottom: 4 }}>Személy *</div>
+                  <div style={{ fontSize: 12, color: 'var(--color-muted)', marginBottom: 4 }}>{copy.common.personRequired}</div>
                   <select style={inp} value={newBreakPersonId} onChange={e => setNewBreakPersonId(e.target.value)}>
-                    <option value="">– válassz –</option>
+                    <option value="">{copy.common.pick}</option>
                     {persons.map(p => (
                       <option key={p.id} value={p.id}>{p.display_name}</option>
                     ))}
@@ -1642,12 +1652,12 @@ export function Beallitasok() {
                 {/* Dátumok */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                   <div>
-                    <div style={{ fontSize: 12, color: 'var(--color-muted)', marginBottom: 4 }}>Tól *</div>
+                    <div style={{ fontSize: 12, color: 'var(--color-muted)', marginBottom: 4 }}>{copy.common.from}</div>
                     <input type="date" style={inp} value={newBreakFrom}
                       onChange={e => setNewBreakFrom(e.target.value)} />
                   </div>
                   <div>
-                    <div style={{ fontSize: 12, color: 'var(--color-muted)', marginBottom: 4 }}>Ig *</div>
+                    <div style={{ fontSize: 12, color: 'var(--color-muted)', marginBottom: 4 }}>{copy.common.to}</div>
                     <input type="date" style={inp} value={newBreakTo}
                       onChange={e => setNewBreakTo(e.target.value)} />
                   </div>
@@ -1655,28 +1665,28 @@ export function Beallitasok() {
 
                 {/* Ok */}
                 <div>
-                  <div style={{ fontSize: 12, color: 'var(--color-muted)', marginBottom: 4 }}>Ok</div>
+                  <div style={{ fontSize: 12, color: 'var(--color-muted)', marginBottom: 4 }}>{copy.common.reason}</div>
                   <select style={inp} value={newBreakReason}
                     onChange={e => setNewBreakReason(e.target.value as BreakReason)}>
-                    <option value="vacation">Szünet / vakáció</option>
-                    <option value="illness">Betegség</option>
-                    <option value="other">Egyéb</option>
+                    <option value="vacation">{copy.settings.reasonVacationLong}</option>
+                    <option value="illness">{copy.settings.reasonIllness}</option>
+                    <option value="other">{copy.settings.reasonOther}</option>
                   </select>
                 </div>
 
                 {/* Megjegyzés */}
                 <div>
-                  <div style={{ fontSize: 12, color: 'var(--color-muted)', marginBottom: 4 }}>Megjegyzés</div>
-                  <input style={inp} value={newBreakNote} placeholder="pl. téli szünet, influenza…"
+                  <div style={{ fontSize: 12, color: 'var(--color-muted)', marginBottom: 4 }}>{copy.form.note}</div>
+                  <input style={inp} value={newBreakNote} placeholder={copy.settings.breakNotePlaceholder}
                     onChange={e => setNewBreakNote(e.target.value)} />
                 </div>
 
                 <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
                   <button style={btnPrimary} disabled={breakSaving} onClick={addBreakPeriod}>
-                    {breakSaving ? '…' : '✓ Mentés'}
+                    {breakSaving ? copy.common.working : copy.common.save}
                   </button>
                   <button style={btnGhost} onClick={() => { setNewBreakOpen(false); setBreakError(null) }}>
-                    Mégse
+                    {copy.common.cancel}
                   </button>
                 </div>
               </div>
@@ -1684,16 +1694,16 @@ export function Beallitasok() {
 
             {/* Lista */}
             {breakLoading ? (
-              <div style={{ fontSize: 13, color: 'var(--color-muted)', padding: '12px 0' }}>Betöltés…</div>
+              <div style={{ fontSize: 13, color: 'var(--color-muted)', padding: '12px 0' }}>{copy.common.loading}</div>
             ) : breakPeriods.length === 0 ? (
               <div style={{ fontSize: 13, color: 'var(--color-muted)', padding: '12px 0', textAlign: 'center' }}>
-                Még nincs rögzített szünet-időszak.
+                {copy.settings.breakEmpty}
               </div>
             ) : breakPeriods.map(bp => {
               const person = persons.find(p => p.id === bp.person_id)
-              const reasonLabel = bp.reason === 'illness' ? 'Betegség'
-                                : bp.reason === 'vacation' ? 'Szünet'
-                                : 'Egyéb'
+              const reasonLabel = bp.reason === 'illness' ? copy.settings.reasonIllness
+                                : bp.reason === 'vacation' ? copy.settings.reasonVacation
+                                : copy.settings.reasonOther
               const reasonColor = bp.reason === 'illness' ? '#fca5a5'
                                 : bp.reason === 'vacation' ? '#93c5fd'
                                 : 'var(--color-muted)'
@@ -1721,13 +1731,13 @@ export function Beallitasok() {
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--color-muted)', marginTop: 3 }}>
                       {bp.date_from === bp.date_to
-                        ? bp.date_from
-                        : `${bp.date_from} – ${bp.date_to}`}
+                        ? formatShortDate(bp.date_from)
+                        : `${formatShortDate(bp.date_from)} – ${formatShortDate(bp.date_to)}`}
                       {bp.note && <span style={{ marginLeft: 6 }}>· {bp.note}</span>}
                     </div>
                   </div>
-                  <button style={btnDanger} onClick={() => deleteBreakPeriod(bp)} title="Szünet törlése">
-                    🗑
+                  <button style={btnDanger} onClick={() => deleteBreakPeriod(bp)} title={copy.settings.breakDelete} aria-label={copy.settings.breakDelete}>
+                    <Icon name="trash" size={14} />
                   </button>
                 </div>
               )
@@ -1738,7 +1748,7 @@ export function Beallitasok() {
         {tab === 'diagnozis' && (
           <div style={{ padding: '16px' }}>
             <p style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 16 }}>
-              Ellenőrzi az adatbázis koherenciáját: transport leg-ek, időtartamok, sablon-átfedések, útidők.
+              {copy.settings.diagnoseHint}
             </p>
             <button
               onClick={runDiagnosis}
@@ -1749,7 +1759,7 @@ export function Beallitasok() {
                 border: 'none', cursor: diagRunning ? 'not-allowed' : 'pointer',
                 opacity: diagRunning ? 0.7 : 1, marginBottom: 20,
               }}
-            >{diagRunning ? '🔍 Ellenőrzés…' : '🔍 Diagnózis futtatása'}</button>
+            >{diagRunning ? copy.settings.diagnoseRunning : copy.settings.diagnoseRun}</button>
 
             {diagResults && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -1769,7 +1779,7 @@ export function Beallitasok() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
                       <div style={{ flex: 1 }}>
                         <span style={{ marginRight: 6 }}>
-                          {r.severity === 'ok' ? '✅' : r.severity === 'warn' ? '⚠️' : '❌'}
+                          {r.severity === 'ok' ? <Icon name="check-circle" size={14} weight="fill" /> : r.severity === 'warn' ? <Icon name="warning" size={14} weight="fill" /> : <Icon name="x" size={14} weight="bold" />}
                         </span>
                         {r.label}
                         {r.detail && (
@@ -1788,7 +1798,7 @@ export function Beallitasok() {
                             background: 'var(--color-blue)', color: '#fff',
                             border: 'none', opacity: fixingId === r.id ? 0.6 : 1,
                           }}
-                        >{fixingId === r.id ? '…' : '🔧 Javítás'}</button>
+                        >{fixingId === r.id ? copy.common.working : copy.settings.diagnoseFix}</button>
                       )}
                     </div>
                   </div>
@@ -1816,7 +1826,7 @@ export function Beallitasok() {
             fontWeight: 500, cursor: 'pointer', minHeight: 44,
             border: '1px solid #7f1d1d', background: 'transparent', color: '#fca5a5',
           }}>
-            Kijelentkezés
+            {copy.settings.signOut}
           </button>
         </div>
       </div>

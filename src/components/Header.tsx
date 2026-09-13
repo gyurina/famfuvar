@@ -1,5 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { PushInbox } from './PushInbox'
+import { Icon } from './Icon'
+import { copy } from '../copy'
 
 interface HeaderProps {
   title: string
@@ -22,9 +24,9 @@ export function Header({ title, subtitle, action }: HeaderProps) {
           <button
             className="icon-btn"
             onClick={() => nav('/beallitasok')}
-            aria-label="Beállítások"
+            aria-label={copy.a11y.settings}
           >
-            ⚙️
+            <Icon name="gear" size={22} />
           </button>
         </div>
       </div>

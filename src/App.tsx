@@ -9,6 +9,7 @@ import { Sablon } from './screens/Sablon'
 import { Esemeny } from './screens/Esemeny'
 import { Beallitasok } from './screens/Beallitasok'
 import { OfflineBanner } from './components/OfflineBanner'
+import { Icon } from './components/Icon'
 
 function AppShell() {
   const { session, loading } = useAuth()
@@ -16,7 +17,7 @@ function AppShell() {
   if (loading) {
     return (
       <div className="min-h-dvh flex items-center justify-center">
-        <div className="text-4xl animate-pulse">🚗</div>
+        <Icon name="steering-wheel" size={44} className="animate-pulse" />
       </div>
     )
   }
