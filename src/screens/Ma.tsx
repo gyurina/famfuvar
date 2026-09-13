@@ -3,30 +3,48 @@ import { Header } from '../components/Header'
 import { supabase } from '../lib/supabase'
 import { useHousehold } from '../hooks/useHousehold'
 import { useAuth } from '../lib/auth'
-import type { TransportLeg, Occurrence } from '../types'
+import { useRole } from '../hooks/useRole'
+import { useAssignDriver, type AssignmentPatch } from '../hooks/useAssignDriver'
+import type { Occurrence } from '../types'
 import { BreakModal } from '../components/BreakModal'
 import { QuickLogModal } from '../components/QuickLogModal'
+import { RideCard } from '../components/RideCard'
 import { copy } from '../copy'
 import { formatDayLong, formatTime, toIsoDate, directionWord } from '../lib/format'
+import {
+  blocksForRide,
+  companionIdsOf,
+  nextCompanions,
+  rideState,
+  type RideRow,
+} from '../lib/rideUi'
 import { Icon } from '../components/Icon'
 import { Avatar } from '../components/Avatar'
 import { Pill } from '../components/Pill'
 
-type LegWithOcc = TransportLeg & { occurrence: Occurrence; companion_id?: string | null }
+type LegWithOcc = RideRow & { occurrence: Occurrence }
 
 export function Ma() {
   const { person } = useAuth()
-  const { personById, locationById, householdId, persons } = useHousehold()
+  const { canAssignOthers, canSelfAssign, canEditOccurrence } = useRole()
+  const { personById, locationById, householdId, persons, drivers } = useHousehold()
   const [showBreak,    setShowBreak]    = useState(false)
   const [breakPersonId,setBreakPersonId]= useState<string | undefined>(undefined)
   const [showQuickLog, setShowQuickLog] = useState(false)
   const [reloadKey,    setReloadKey]    = useState(0)
   const [allLegs, setAllLegs] = useState<LegWithOcc[]>([])
   const [loading, setLoading] = useState(true)
+  const [pinnedOpenIds, setPinnedOpenIds] = useState<Set<string>>(new Set())
 
   const today        = toIsoDate(new Date())
   const todayDisplay = formatDayLong(new Date())
   const householdNames = persons.map(p => p.display_name)
+
+  function applyPatch(patch: AssignmentPatch) {
+    setAllLegs(prev => prev.map(l => l.id === patch.id ? { ...l, ...patch } : l))
+    setPinnedOpenIds(prev => new Set(prev).add(patch.id))
+  }
+  const { assign, release, claim } = useAssignDriver(applyPatch)
 
   useEffect(() => {
     if (!householdId || !person) return
@@ -44,17 +62,23 @@ export function Ma() {
   }, [householdId, person?.id, reloadKey, today])
 
   const myLegs     = allLegs.filter(l =>
-    l.driver_id === person?.id || l.companion_id === person?.id
+    (l.driver_id === person?.id || l.companion_id === person?.id || l.companion2_id === person?.id)
+    && !pinnedOpenIds.has(l.id)
   )
   const otherLegs  = allLegs.filter(l =>
     l.driver_id &&
     l.driver_id !== person?.id &&
-    l.companion_id !== person?.id
+    l.companion_id !== person?.id &&
+    l.companion2_id !== person?.id &&
+    !pinnedOpenIds.has(l.id)
   )
   const orphanLegs = allLegs.filter(l =>
+    pinnedOpenIds.has(l.id) ||
+    (!l.driver_id && !l.self_transport && l.occurrence?.status !== 'cancelled')
+  )
+  const hasIssue   = allLegs.some(l =>
     !l.driver_id && !l.self_transport && l.occurrence?.status !== 'cancelled'
   )
-  const hasIssue   = orphanLegs.length > 0
 
   return (
     <div style={{ background: 'var(--color-bg)', minHeight: '100dvh' }}>
@@ -240,22 +264,36 @@ export function Ma() {
                 {orphanLegs.map(leg => {
                   const occ   = leg.occurrence
                   const child = personById(occ.person_id)
+                  if (!child) return null
+                  const fromLoc = locationById(leg.from_location)
                   return (
-                    <div key={leg.id} className="leg-card orphan" style={{ display: 'flex' }}>
-                      <div className="leg-card-stripe" style={{ background: child?.color ?? 'var(--color-red)' }} />
-                      <div className="leg-card-body">
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13 }}>
-                            <span className="tabular" style={{ fontWeight: 700 }}>
-                              {formatTime(leg.depart_at)}
-                            </span>
-                            {' '}{directionWord(leg.direction)} {occ.title}
-                            {child && <span style={{ fontSize: 11, color: 'var(--color-text-2)', marginLeft: 4 }}>({child.display_name})</span>}
-                          </div>
-                        </div>
-                        <Pill tone="danger">{copy.status.noDriver}</Pill>
-                      </div>
-                    </div>
+                    <RideCard
+                      key={leg.id}
+                      ride={leg}
+                      event={{ title: occ.title, locationName: fromLoc?.name }}
+                      child={child}
+                      state={rideState(leg)}
+                      mergeHint={undefined}
+                      canAssign={canAssignOthers}
+                      canClaim={canSelfAssign && !canAssignOthers}
+                      canEdit={canEditOccurrence}
+                      drivers={drivers}
+                      blocks={blocksForRide(leg, allLegs, drivers, [])}
+                      householdNames={householdNames}
+                      viewerId={person?.id}
+                      fromHome={!!fromLoc?.is_home}
+                      fromName={fromLoc?.name ?? null}
+                      onAssign={driverId => assign(leg.id, driverId, companionIdsOf(leg).filter(id => id !== driverId))}
+                      onCompanion={id => {
+                        if (!leg.driver_id) { assign(leg.id, id); return }
+                        assign(leg.id, leg.driver_id, nextCompanions(companionIdsOf(leg).filter(c => c !== leg.driver_id), id))
+                      }}
+                      onSelf={() => assign(leg.id, null, [], true)}
+                      onRelease={() => release(leg.id)}
+                      onClaim={person?.id ? () => claim(leg.id, person.id) : undefined}
+                      onMerge={() => {}}
+                      onOpenMenu={() => {}}
+                    />
                   )
                 })}
               </div>

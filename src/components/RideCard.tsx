@@ -1,75 +1,234 @@
-import type { ReactNode } from 'react'
+import { useState } from 'react'
+import { Avatar } from './Avatar'
+import { DriverRow, type DriverBlock } from './DriverRow'
+import { Icon } from './Icon'
+import { Pill } from './Pill'
+import { copy } from '../copy'
+import { formatTime } from '../lib/format'
+import {
+  assignedSentence,
+  companionIdsOf,
+  driverMode,
+  rideDurationMins,
+  rideSubtitle,
+  type EventSummary,
+  type RideRow,
+} from '../lib/rideUi'
+import type { Person } from '../types'
 
-export type RideCardVariant = 'assigned' | 'unassigned' | 'self' | 'grouped' | 'cancelled'
-
-interface RideCardProps {
-  variant: RideCardVariant
-  /** pötty szín (gyerek színe) */
-  dotColor?: string
-  title: string
-  /** pl. "Odaút · Otthonról · 15 perc" vagy "Elmarad — beteg" cancelled esetén */
-  subtitle?: ReactNode
-  time?: string
-  cancelled?: boolean
-  /** assigned/self alsó sor tartalma (pl. driver info + „Csere" link) */
-  footer?: ReactNode
-  /** unassigned esetén ide kerül a DriverRow */
-  children?: ReactNode
-  onClick?: () => void
+export interface RideCardProps {
+  ride: RideRow
+  event: EventSummary
+  child: Person
+  state: 'assigned' | 'open' | 'self' | 'cancelled'
+  pairedRide?: RideRow | null
+  mergeHint?: { rideId: string; text: string }
+  canAssign: boolean
+  canClaim: boolean
+  canEdit: boolean
+  drivers: Person[]
+  blocks: Record<string, DriverBlock>
+  householdNames?: string[]
+  viewerId?: string | null
+  fromHome?: boolean
+  fromName?: string | null
+  onAssign: (driverId: string) => void
+  onCompanion: (id: string) => void
+  onSelf: () => void
+  onRelease: () => void
+  onClaim?: () => void
+  onMerge: (rideId: string) => void
+  onOpenMenu: () => void
 }
 
-const variantStyle: Record<RideCardVariant, React.CSSProperties> = {
-  assigned:   { background: 'var(--color-surface)', border: '1px solid var(--color-border)' },
-  self:       { background: 'var(--color-surface)', border: '1px solid var(--color-border)' },
-  grouped:    { background: 'var(--color-surface)', border: '1px solid var(--color-border)' },
-  unassigned: { background: 'linear-gradient(160deg, #251016 0%, #14121f 100%)', border: '1px solid rgba(242,107,107,.4)' },
-  cancelled:  { background: '#0c1626', border: '1px solid #1b2b3e' },
-}
+export function RideCard({
+  ride,
+  event,
+  child,
+  state,
+  pairedRide = null,
+  mergeHint,
+  canAssign,
+  canClaim,
+  canEdit,
+  drivers,
+  blocks,
+  householdNames = [],
+  viewerId = null,
+  fromHome = false,
+  fromName = null,
+  onAssign,
+  onCompanion,
+  onSelf,
+  onRelease,
+  onClaim,
+  onMerge,
+  onOpenMenu,
+}: RideCardProps) {
+  const [editing, setEditing] = useState(false)
+  const driver = drivers.find(d => d.id === ride.driver_id) ?? null
+  const companions = companionIdsOf(ride)
+  const duration = rideDurationMins(ride)
+  const subtitle = rideSubtitle(ride.direction, fromHome, fromName ?? null, duration)
+  const mode = driverMode({
+    canAssignOthers: canAssign,
+    canSelfAssign: canClaim,
+    isOpen: state === 'open',
+  })
+  const showRow = mode === 'assign' && (state === 'open' || editing)
+  const showClaim = mode === 'claim' && state === 'open'
+  const isOwn = !!viewerId && (ride.driver_id === viewerId || companions.includes(viewerId) || ride.self_transport)
+  const showCantTake = !canAssign && canClaim && (state === 'assigned' || state === 'self') && isOwn
+  const pairedSameDriver = pairedRide
+    && ride.driver_id
+    && pairedRide.driver_id === ride.driver_id
+    && !ride.self_transport
 
-/** Egy fuvar-alkalom kártyája — 5 vizuális állapot, közös vázzal. */
-export function RideCard({ variant, dotColor, title, subtitle, time, cancelled, footer, children, onClick }: RideCardProps) {
+  const title = `${child.display_name} · ${event.title}`
+  const modifier =
+    state === 'cancelled' ? 'cancelled'
+    : showClaim ? 'claim'
+    : state === 'open' && canAssign ? 'open'
+    : 'default'
+
+  function handlePickDriver(id: string) {
+    if (ride.driver_id === id && !ride.self_transport) {
+      onRelease()
+      setEditing(false)
+      return
+    }
+    onAssign(id)
+    setEditing(false)
+  }
+
   return (
-    <div
-      onClick={onClick}
-      style={{
-        borderRadius: 18, padding: '15px 16px 14px', ...variantStyle[variant],
-        cursor: onClick ? 'pointer' : 'default',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: children || footer ? 12 : 0 }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
-            {dotColor && <span style={{ width: 8, height: 8, borderRadius: '50%', background: dotColor, flex: 'none', opacity: cancelled ? 0.6 : 1 }} />}
-            <span style={{
-              fontSize: 16, fontWeight: 600,
-              textDecoration: cancelled ? 'line-through' : 'none',
-              color: cancelled ? 'var(--color-muted)' : 'var(--color-text)',
-            }}>{title}</span>
+    <article className={`ride-card ride-card--${modifier}`}>
+      <div className="ride-card-head">
+        <div className="ride-card-head-main">
+          <div className="ride-card-title-row">
+            <span className="ride-card-dot" style={{ background: child.color, opacity: state === 'cancelled' ? 0.6 : 1 }} />
+            <span className={`ride-card-title${state === 'cancelled' ? ' is-cancelled' : ''}`}>{title}</span>
           </div>
-          {subtitle && (
-            <div style={{ fontSize: 13.5, color: variant === 'cancelled' ? 'var(--color-warn)' : 'var(--color-text-2)' }}>{subtitle}</div>
+          {state === 'cancelled' ? (
+            <div className="ride-card-sub ride-card-sub--warn">
+              <Icon name="prohibit" size={14} weight="fill" />
+              {ride.occurrence?.note
+                ? copy.status.cancelledWithReason(ride.occurrence.note)
+                : copy.status.cancelled}
+            </div>
+          ) : (
+            <div className="ride-card-sub">{subtitle}</div>
           )}
         </div>
-        {time && (
-          <div style={{
-            fontSize: 19, fontWeight: 600, fontVariantNumeric: 'tabular-nums', flex: 'none',
-            color: cancelled ? 'var(--color-muted)' : 'var(--color-text)',
-            textDecoration: cancelled ? 'line-through' : 'none',
-          }}>{time}</div>
-        )}
+        <div className="ride-card-time-col">
+          <span className={`ride-card-time${state === 'cancelled' ? ' is-cancelled' : ''}`}>
+            {formatTime(ride.depart_at)}
+          </span>
+          {canEdit && state !== 'cancelled' && (
+            <button type="button" className="ride-card-menu" onClick={onOpenMenu} aria-label={copy.a11y.moreActions}>
+              <Icon name="dots-three" size={20} />
+            </button>
+          )}
+        </div>
       </div>
 
-      {children && (
-        <div style={{ paddingTop: variant === 'unassigned' ? 13 : 0, borderTop: variant === 'unassigned' ? '1px solid rgba(242,107,107,.22)' : 'none' }}>
-          {children}
-        </div>
+      {mergeHint && state !== 'cancelled' && canAssign && (
+        <button
+          type="button"
+          className="ride-card-merge"
+          onClick={() => onMerge(mergeHint.rideId)}
+        >
+          <Pill tone="warn">{mergeHint.text}</Pill>
+        </button>
       )}
 
-      {footer && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 12, marginTop: 12, borderTop: '1px solid #1c2e42' }}>
-          {footer}
+      {state !== 'cancelled' && (showRow || showClaim || state === 'assigned' || state === 'self') && (
+        <div className={`ride-card-strip${state === 'open' || showClaim ? ' is-open' : ''}`}>
+          {showClaim && (
+            <>
+              <div className="ride-card-pick-label ride-card-pick-label--ok">{copy.rides.nobodyTook}</div>
+              <DriverRow
+                drivers={drivers}
+                driverId={ride.driver_id}
+                companionIds={companions}
+                selfTransport={ride.self_transport}
+                blocks={blocks}
+                mode="claim"
+                onPickDriver={handlePickDriver}
+                onPickCompanion={onCompanion}
+                onPickSelf={onSelf}
+                onClaim={onClaim}
+              />
+            </>
+          )}
+
+          {showRow && (
+            <>
+              <div className="ride-card-pick-label">{copy.rides.whoDrives}</div>
+              <DriverRow
+                drivers={drivers}
+                driverId={ride.driver_id}
+                companionIds={companions}
+                selfTransport={ride.self_transport}
+                blocks={blocks}
+                mode="assign"
+                householdNames={householdNames}
+                onPickDriver={handlePickDriver}
+                onPickCompanion={onCompanion}
+                onPickSelf={onSelf}
+              />
+            </>
+          )}
+
+          {!showRow && !showClaim && state === 'assigned' && driver && (
+            <div className="ride-card-assigned">
+              <Avatar person={driver} size={34} householdNames={householdNames} />
+              <div className="ride-card-assigned-text">
+                <div className="ride-card-assigned-title">{assignedSentence(driver.display_name, ride.direction)}</div>
+                {pairedSameDriver && pairedRide && (
+                  <div className="ride-card-assigned-sub">{copy.rides.alsoCollects(formatTime(pairedRide.depart_at))}</div>
+                )}
+                {companions[0] && !pairedSameDriver && (
+                  <div className="ride-card-assigned-sub">
+                    {copy.sentence.companionGoes(
+                      drivers.find(d => d.id === companions[0])?.display_name ?? '',
+                    )}
+                  </div>
+                )}
+              </div>
+              {canAssign && (
+                <button type="button" className="ride-card-swap" onClick={() => setEditing(true)}>
+                  {copy.rides.swap}
+                </button>
+              )}
+              {showCantTake && (
+                <button type="button" className="ride-card-swap is-muted" onClick={onRelease}>
+                  {copy.rides.cantTake}
+                </button>
+              )}
+            </div>
+          )}
+
+          {!showRow && !showClaim && state === 'self' && (
+            <div className="ride-card-assigned">
+              <Avatar variant="self" size={34} />
+              <div className="ride-card-assigned-text">
+                <div className="ride-card-assigned-title">{copy.status.selfGoesHome}</div>
+              </div>
+              {canAssign && (
+                <button type="button" className="ride-card-swap" onClick={() => setEditing(true)}>
+                  {copy.rides.swap}
+                </button>
+              )}
+              {showCantTake && (
+                <button type="button" className="ride-card-swap is-muted" onClick={onRelease}>
+                  {copy.rides.cantTake}
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
-    </div>
+    </article>
   )
 }

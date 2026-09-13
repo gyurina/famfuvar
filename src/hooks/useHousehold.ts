@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { db } from '../lib/db'
 import { useAuth } from '../lib/auth'
 import type { Person, Location, TravelGroup, TravelGroupMember, TravelTime, DriverAvailability } from '../types'
+import { sortDrivers } from '../lib/rideUi'
 
 export function useHousehold() {
   const { person } = useAuth()
@@ -65,7 +66,7 @@ export function useHousehold() {
     load()
   }, [person?.household_id])
 
-  const drivers = persons.filter(p => p.can_drive)
+  const drivers = sortDrivers(persons)
   const children = persons.filter(p => p.role === 'child')
   const home = locations.find(l => l.is_home) ?? null
 

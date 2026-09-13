@@ -220,6 +220,7 @@ a { color: inherit; text-decoration: none; }
   align-items: center;
   justify-content: center;
   line-height: 1;
+  position: relative;
 }
 
 /* ── Leg kártya ──────────────────────────────────── */
@@ -491,9 +492,351 @@ a { color: inherit; text-decoration: none; }
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 2px solid var(--color-bg);
+  border: 2px solid var(--color-surface);
 }
 .avatar.size-52 .avatar-badge { width: 18px; height: 18px; }
+
+.avatar.mark-driver {
+  box-shadow: 0 0 0 4px var(--color-surface), 0 0 0 6px var(--color-accent-ink);
+}
+.avatar.mark-companion {
+  box-shadow: 0 0 0 4px var(--color-surface);
+  outline: 2px dashed #4ce3a0;
+  outline-offset: 4px;
+}
+
+/* ── DriverRow (C1) ──────────────────────────────── */
+.driver-row-wrap {
+  position: relative;
+}
+.driver-row {
+  display: flex;
+  gap: 8px;
+}
+.driver-row.fit .driver-row-item {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.driver-row.scroll {
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  gap: 12px;
+  padding-right: 34px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.driver-row.scroll::-webkit-scrollbar { display: none; }
+.driver-row.scroll .driver-row-item {
+  flex: none;
+  width: 52px;
+  scroll-snap-align: start;
+}
+.driver-row-fade {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 34px;
+  background: linear-gradient(90deg, transparent, var(--color-surface) 70%);
+  pointer-events: none;
+}
+.ride-card--open .driver-row-fade,
+.ride-card--claim .driver-row-fade {
+  background: linear-gradient(90deg, transparent, #17121f 70%);
+}
+.driver-row-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  padding: 4px 0 0;
+  min-width: 44px;
+  min-height: 44px;
+  color: inherit;
+}
+.driver-row-label {
+  font-size: 11.5px;
+  color: var(--color-text-2);
+  text-align: center;
+  line-height: 1.2;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.driver-row-item.is-driver .driver-row-label {
+  color: var(--color-accent-ink);
+  font-weight: 600;
+}
+.driver-row-item.is-companion .driver-row-label {
+  color: #4ce3a0;
+  font-weight: 600;
+}
+.driver-row-item.is-blocked { opacity: 0.45; }
+.driver-row-item.is-blocked .driver-row-label { color: var(--color-muted); }
+.driver-row-item.is-pending { opacity: 1; }
+.driver-row-item.is-pending .driver-row-label {
+  color: var(--color-danger);
+  font-weight: 600;
+  white-space: normal;
+}
+.driver-row--read {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.driver-row-read-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+.driver-row-claim {
+  width: 100%;
+  height: 46px;
+  min-height: 44px;
+  border-radius: 100px;
+  border: 1px solid rgba(45, 216, 138, 0.4);
+  background: rgba(45, 216, 138, 0.14);
+  color: #4ce3a0;
+  font-size: 15px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+}
+
+/* ── RideCard / GroupedRideCard (C2, C3) ─────────── */
+.ride-card {
+  border-radius: 18px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  padding: 15px 16px 14px;
+}
+.ride-card--open {
+  background: linear-gradient(160deg, #1f1119 0%, #101627 100%);
+  border: 1px solid rgba(242, 107, 107, 0.4);
+}
+.ride-card--claim {
+  background: linear-gradient(160deg, #0f1f1a 0%, #101627 100%);
+  border: 1px solid rgba(45, 216, 138, 0.35);
+}
+.ride-card--cancelled {
+  background: #0c1626;
+  border: 1px solid #1b2b3e;
+}
+.ride-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.ride-card-head-main { flex: 1; min-width: 0; }
+.ride-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+.ride-card-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+.ride-card-title {
+  font-size: 16px;
+  font-weight: 600;
+  min-width: 0;
+}
+.ride-card-title.is-cancelled {
+  text-decoration: line-through;
+  color: var(--color-text-2);
+}
+.ride-card-sub {
+  font-size: 13.5px;
+  color: var(--color-text-2);
+}
+.ride-card-sub--warn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-warn);
+}
+.ride-card-time-col {
+  text-align: right;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+.ride-card-time {
+  font-size: 19px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.ride-card-time.is-cancelled {
+  color: var(--color-muted);
+  text-decoration: line-through;
+}
+.ride-card-time-2 {
+  font-size: 12.5px;
+  color: var(--color-muted);
+  font-variant-numeric: tabular-nums;
+}
+.ride-card-menu {
+  width: 36px;
+  height: 36px;
+  min-width: 44px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--color-muted);
+  margin: -4px -8px -8px 0;
+}
+.ride-card-merge {
+  display: flex;
+  margin-top: 10px;
+  background: none;
+  border: none;
+  padding: 0;
+  min-height: 44px;
+  align-items: center;
+}
+.ride-card-strip {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #1c2e42;
+}
+.ride-card-strip.is-open {
+  border-top-color: rgba(242, 107, 107, 0.22);
+}
+.ride-card--claim .ride-card-strip.is-open {
+  border-top-color: rgba(45, 216, 138, 0.22);
+}
+.ride-card-pick-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #f4908f;
+  margin-bottom: 8px;
+}
+.ride-card-pick-label--ok { color: var(--color-text-2); font-weight: 500; }
+.ride-card-assigned {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ride-card-assigned-text { flex: 1; min-width: 0; }
+.ride-card-assigned-title { font-size: 14px; font-weight: 600; }
+.ride-card-assigned-sub { font-size: 12.5px; color: var(--color-muted); }
+.ride-card-swap {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-accent-ink);
+  background: none;
+  border: none;
+  padding: 10px 2px;
+  min-height: 44px;
+  min-width: 44px;
+}
+.ride-card-swap.is-muted {
+  color: var(--color-text-2);
+  font-weight: 500;
+}
+
+.grouped-stops {
+  list-style: none;
+  margin: 13px 0 0;
+  padding: 0 0 0 20px;
+  position: relative;
+}
+.grouped-stops::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 9px;
+  bottom: 9px;
+  width: 2px;
+  background: var(--color-border-2);
+  border-radius: 2px;
+}
+.grouped-stops.is-open::before {
+  background: rgba(242, 107, 107, 0.3);
+}
+.grouped-stop {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: relative;
+  margin-bottom: 11px;
+}
+.grouped-stop:last-child { margin-bottom: 0; }
+.grouped-stop-dot {
+  position: absolute;
+  left: -20px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px var(--color-surface);
+}
+.ride-card--open .grouped-stop-dot,
+.ride-card--claim .grouped-stop-dot {
+  box-shadow: 0 0 0 3px #17121f;
+}
+.grouped-stop-time {
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-muted);
+  width: 42px;
+  flex: none;
+}
+.grouped-stop-label { font-size: 14px; flex: 1; }
+.grouped-avatars {
+  display: flex;
+  flex: none;
+}
+.grouped-avatars .avatar + .avatar {
+  margin-left: -11px;
+  box-shadow: 0 0 0 2px var(--color-surface);
+}
+.grouped-split {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  margin-top: 12px;
+  padding-top: 12px;
+  min-height: 44px;
+  border: none;
+  border-top: 1px solid rgba(242, 107, 107, 0.16);
+  background: none;
+  color: var(--color-text-2);
+  font-size: 12.5px;
+  text-align: left;
+}
+.grouped-split span { flex: 1; }
+
+.nav-badge {
+  position: absolute;
+  top: -8px;
+  right: -12px;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  background: var(--color-danger);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+}
 
 /* ── Pill (C8) ───────────────────────────────────── */
 .pill {

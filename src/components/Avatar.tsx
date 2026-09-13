@@ -1,12 +1,9 @@
-import type { Person } from '../types'
+import type { DriverBlock, Person } from '../types'
 import { Icon } from './Icon'
 
 export type AvatarSize = 26 | 34 | 46 | 52
 
-export type DriverBlock =
-  | { kind: 'ride'; label: string }
-  | { kind: 'calendar'; label: string }
-  | { kind: 'absence'; label: string }
+export type { DriverBlock }
 
 interface AvatarProps {
   person?: Pick<Person, 'display_name' | 'color'> | null
@@ -15,6 +12,8 @@ interface AvatarProps {
   householdNames?: string[]
   block?: DriverBlock
   variant?: 'person' | 'self'
+  /** Sofőr-gyűrű / kísérő-gyűrű a DriverRow-ban. */
+  mark?: 'driver' | 'companion'
 }
 
 function monogram(name: string, householdNames: string[]): string {
@@ -41,24 +40,28 @@ export function Avatar({
   householdNames = [],
   block,
   variant = 'person',
+  mark,
 }: AvatarProps) {
-  const showBadge = !!block && (size === 46 || size === 52)
+  const showBadge = !!block && (size === 46 || size === 52) && mark !== 'driver' && mark !== 'companion'
 
   if (variant === 'self') {
     return (
-      <span className={`avatar self size-${size}`}>
+      <span className={`avatar self size-${size}${mark ? ` mark-${mark}` : ''}`}>
         <Icon name="person-simple-walk" size={size >= 46 ? 20 : 17} />
       </span>
     )
   }
 
   const name = person?.display_name ?? ''
+  const markClass = mark ? ` mark-${mark}` : ''
   return (
     <span
-      className={`avatar size-${size}`}
+      className={`avatar size-${size}${markClass}`}
       style={{ background: person?.color ?? 'var(--color-muted)' }}
     >
-      {monogram(name, householdNames)}
+      {mark === 'driver'
+        ? <Icon name="steering-wheel" size={size >= 52 ? 21 : size >= 46 ? 19 : 15} weight="fill" color="#fff" />
+        : monogram(name, householdNames)}
       {showBadge && block && (
         <span className="avatar-badge" style={{ background: badgeBg(block.kind) }}>
           <Icon

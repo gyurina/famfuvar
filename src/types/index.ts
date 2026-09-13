@@ -28,6 +28,11 @@ export type OccurrenceStatus = 'planned' | 'cancelled' | 'moved'
 export type LegDirection = 'dropoff' | 'pickup'
 export type CalendarVisibility = 'full' | 'busy_only'
 
+export type DriverBlock =
+  | { kind: 'ride'; label: string }
+  | { kind: 'calendar'; label: string }
+  | { kind: 'absence'; label: string }
+
 // ── Entities ─────────────────────────────────────────────────────────────────
 export interface Household {
   id: string

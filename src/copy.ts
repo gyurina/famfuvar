@@ -104,6 +104,11 @@ export const copy = {
     moreActions: 'További műveletek',
     delete: 'Törlés',
     edit: 'Szerkesztés',
+    drivers: 'Sofőrök',
+    driverTakes: (name: string) => `${name} viszi`,
+    selfGoes: 'Önállóan megy',
+    openRides: (n: number) =>
+      n === 1 ? 'Egy nyitott fuvar' : `${n} nyitott fuvar`,
   },
 
   direction: {
@@ -141,6 +146,9 @@ export const copy = {
     groupOpenOutbound: (who: string) => `Ki viszi el ${who}?`,
     othersToday: (names: string, n: number) =>
       `${names} ${n} fuvart visz ma`,
+    driverTakes: (name: string) => `${name} viszi`,
+    driverCollects: (name: string) => `${name} begyűjti`,
+    companionGoes: (name: string) => `${name} is megy`,
   },
 
   ma: {
@@ -197,6 +205,19 @@ export const copy = {
     travelMins: (n: number) => `~${n} perc`,
     pickDriver: 'Válassz sofőrt',
     swap: 'Csere',
+    nobodyTook: 'Ezt még senki nem vállalta',
+    confirmAnyway: 'Ütközés — mégis ő',
+    cantTake: 'Nem tudom',
+    oneCar: 'Egy autóval',
+    mergeSuggestInbound: (nameAcc: string, time: string) =>
+      `${nameAcc} is be lehet gyűjteni ${time}-kor`,
+    mergeSuggestOutbound: (nameAcc: string, time: string) =>
+      `${nameAcc} is el lehet vinni ${time}-kor`,
+    alsoCollects: (time: string) => `Be is gyűjti · ${time}`,
+  },
+
+  place: {
+    fromHome: 'Otthonról',
   },
 
   week: {

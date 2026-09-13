@@ -1,5 +1,7 @@
+import { addDays, startOfDay } from 'date-fns'
 import { NavLink } from 'react-router-dom'
 import { useRole } from '../hooks/useRole'
+import { useOpenRides } from '../hooks/useOpenRides'
 import { copy } from '../copy'
 import { Icon, type IconName } from './Icon'
 
@@ -13,6 +15,9 @@ const allTabs: { to: string; label: string; icon: IconName }[] = [
 
 export function BottomNav() {
   const { canSeeSablon } = useRole()
+  const from = startOfDay(new Date()).toISOString()
+  const to = addDays(startOfDay(new Date()), 7).toISOString()
+  const { total } = useOpenRides(from, to)
   const tabs = allTabs.filter(t => t.to !== '/sablon' || canSeeSablon)
 
   return (
@@ -28,6 +33,9 @@ export function BottomNav() {
             <>
               <span className="nav-icon">
                 <Icon name={t.icon} size={24} weight={isActive ? 'fill' : 'regular'} />
+                {t.to === '/fuvar' && total > 0 && (
+                  <span className="nav-badge" aria-label={copy.a11y.openRides(total)}>{total}</span>
+                )}
               </span>
               <span>{t.label}</span>
             </>

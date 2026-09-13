@@ -1,8 +1,3 @@
-// src/hooks/useAssignDriver.ts
-// Egy fuvarláb sofőr-hozzárendelése — optimista írás, offline sorbaállás,
-// notify-driver hívás. A Fuvartabla.tsx-ben már meglévő doAssign logika
-// kiemelve, hogy a Ma képernyő (és később más képernyők) is használhassák.
-
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { db } from '../lib/db'
@@ -10,56 +5,141 @@ import { queueAssignDriver } from '../lib/sync'
 import { useOnlineStatus } from './useOnlineStatus'
 import type { TransportLeg } from '../types'
 
-export function useAssignDriver(onUpdated?: (leg: TransportLeg) => void) {
+export type AssignmentPatch = {
+  id: string
+  driver_id: string | null
+  companion_id: string | null
+  companion2_id: string | null
+  self_transport: boolean
+}
+
+export function useAssignDriver(onUpdated?: (patch: AssignmentPatch) => void) {
   const online = useOnlineStatus()
   const [assigningLegId, setAssigningLegId] = useState<string | null>(null)
+
+  async function writeOne(
+    legId: string,
+    driverId: string | null,
+    companionId: string | null,
+    companion2Id: string | null,
+    selfTransport: boolean,
+    notify: boolean,
+  ) {
+    const patch: AssignmentPatch = {
+      id: legId,
+      driver_id: driverId,
+      companion_id: companionId,
+      companion2_id: companion2Id,
+      self_transport: selfTransport,
+    }
+    onUpdated?.(patch)
+    try {
+      const cached = await db.transport_legs.get(legId)
+      if (cached) await db.transport_legs.put({ ...cached, ...patch })
+    } catch { /* cache optional */ }
+
+    if (!online) {
+      await queueAssignDriver({
+        leg_id: legId,
+        driver_id: driverId,
+        companion_id: companionId,
+        companion2_id: companion2Id,
+        self_transport: selfTransport,
+      })
+      return
+    }
+
+    const { data, error } = await supabase.from('transport_leg')
+      .update({
+        driver_id: driverId,
+        companion_id: companionId,
+        companion2_id: companion2Id,
+        self_transport: selfTransport,
+      })
+      .eq('id', legId)
+      .select('*, occurrence(*)')
+      .maybeSingle()
+
+    if (error) {
+      await queueAssignDriver({
+        leg_id: legId,
+        driver_id: driverId,
+        companion_id: companionId,
+        companion2_id: companion2Id,
+        self_transport: selfTransport,
+      })
+      return
+    }
+
+    if (data) {
+      db.transport_legs.put(data as unknown as TransportLeg).catch(() => {})
+      onUpdated?.({
+        id: data.id,
+        driver_id: data.driver_id,
+        companion_id: data.companion_id,
+        companion2_id: data.companion2_id,
+        self_transport: data.self_transport,
+      })
+    }
+
+    if (notify && driverId && !selfTransport) {
+      supabase.functions.invoke('notify-driver', { body: { leg_id: legId } })
+        .catch(e => console.warn('notify-driver:', e))
+    }
+  }
 
   async function assign(
     legId: string,
     driverId: string | null,
-    companionId: string | null = null,
-    companion2Id: string | null = null,
+    companionIds: string[] = [],
     selfTransport = false,
   ) {
     setAssigningLegId(legId)
     try {
-      if (!online) {
-        await queueAssignDriver({
-          leg_id: legId, driver_id: driverId,
-          companion_id: companionId, companion2_id: companion2Id,
-          self_transport: selfTransport,
-        })
-        return
-      }
-      const { data } = await supabase.from('transport_leg')
-        .update({
-          driver_id: driverId, companion_id: companionId,
-          companion2_id: companion2Id, self_transport: selfTransport,
-        })
-        .eq('id', legId).select('*, occurrence!inner(*)').single()
+      await writeOne(
+        legId,
+        driverId,
+        companionIds[0] ?? null,
+        companionIds[1] ?? null,
+        selfTransport,
+        true,
+      )
+    } finally {
+      setAssigningLegId(null)
+    }
+  }
 
-      if (data) {
-        db.transport_legs.put(data as unknown as TransportLeg).catch(() => {})
-        onUpdated?.(data as unknown as TransportLeg)
-      }
-      if (driverId && !selfTransport) {
-        supabase.functions.invoke('notify-driver', { body: { leg_id: legId } })
-          .catch(e => console.warn('notify-driver:', e))
+  async function assignMany(
+    legIds: string[],
+    driverId: string | null,
+    companionIds: string[] = [],
+    selfTransport = false,
+  ) {
+    if (legIds.length === 0) return
+    setAssigningLegId(legIds[0])
+    try {
+      for (let i = 0; i < legIds.length; i++) {
+        await writeOne(
+          legIds[i],
+          driverId,
+          companionIds[0] ?? null,
+          companionIds[1] ?? null,
+          selfTransport,
+          i === 0,
+        )
       }
     } finally {
       setAssigningLegId(null)
     }
   }
 
-  /** Visszavonás — ugyanarra a sofőrre koppintva. */
   async function release(legId: string) {
-    await assign(legId, null, null, null, false)
+    await assign(legId, null, [], false)
   }
 
-  /** Nagyszülő / szülő „Vállalom" — saját magát sofőrré teszi. */
   async function claim(legId: string, selfPersonId: string) {
-    await assign(legId, selfPersonId, null, null, false)
+    await assign(legId, selfPersonId, [], false)
   }
 
-  return { assign, release, claim, assigningLegId, online }
+  return { assign, assignMany, release, claim, assigningLegId, online }
 }
