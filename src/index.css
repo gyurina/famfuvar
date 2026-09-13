@@ -72,9 +72,28 @@
   /* Árnyékok */
   --shadow-card: 0 2px 12px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04);
   --shadow-popup: 0 8px 32px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.06);
+
+  /* Réteg-sorrend (z-index) */
+  --z-header: 40;
+  --z-nav:    50;
+  --z-modal:  60;
+  --z-toast:  70;
+
+  /* Alsó nav — biztonsági zónával együtt számított magasság */
+  --nav-height: calc(56px + env(safe-area-inset-bottom, 0));
+
+  /* Tartalom max szélessége (tablet / landscape mobil) */
+  --content-max-width: 480px;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
+
+#root {
+  max-width: var(--content-max-width);
+  margin-inline: auto;
+  min-height: 100dvh;
+  position: relative;
+}
 
 body {
   background: var(--color-bg);
@@ -131,7 +150,7 @@ a { color: inherit; text-decoration: none; }
   background: linear-gradient(180deg, var(--color-bg) 60%, transparent);
   position: sticky;
   top: 0;
-  z-index: 40;
+  z-index: var(--z-header);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
 }
@@ -149,6 +168,9 @@ a { color: inherit; text-decoration: none; }
   font-weight: 500;
   color: var(--color-text-2);
   margin-top: 1px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 /* ── Alt nav ─────────────────────────────────────── */
@@ -170,6 +192,7 @@ a { color: inherit; text-decoration: none; }
 
 .nav-item {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -226,6 +249,7 @@ a { color: inherit; text-decoration: none; }
   min-width: 0;
   padding: 12px 12px 12px 14px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
@@ -297,7 +321,7 @@ a { color: inherit; text-decoration: none; }
 
 .picker-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 8px;
 }
 
@@ -357,7 +381,10 @@ a { color: inherit; text-decoration: none; }
 
 .timeline-node {
   position: absolute;
-  left: 10px;
+  left: -38px; /* .timeline-item nincs a .timeline paddingjén kívül, ezért a
+                  .timeline paddingjéhez (48px) képest kell visszatolni,
+                  hogy a --color-border-2 vonallal (.timeline::before, left:20px)
+                  egy vonalba kerüljön, ne a kártya tartalmára csússzon */
   width: 22px;
   height: 22px;
   border-radius: 50%;
@@ -567,7 +594,7 @@ a { color: inherit; text-decoration: none; }
 .bottom-0     { bottom: 0; }
 .left-0       { left: 0; }
 .right-0      { right: 0; }
-.z-50         { z-index: 50; }
+.z-50         { z-index: var(--z-modal); }
 .w-full       { width: 100%; }
 .w-2          { width: 0.5rem; }
 .w-2\.5       { width: 0.625rem; }

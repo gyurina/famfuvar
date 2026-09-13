@@ -232,7 +232,7 @@ export function Sablon() {
       )}
 
       {!loading && (
-        <div style={{ padding: '16px 16px 96px' }}>
+        <div style={{ padding: '16px 16px calc(var(--nav-height) + 40px)' }}>
           {templates.length === 0 && (
             <div className="empty-state">
               <div className="icon"><Icon name="clipboard" size={40} weight="thin" color="#3a5670" /></div>
