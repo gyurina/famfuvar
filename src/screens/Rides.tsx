@@ -1,9 +1,13 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { addDays, startOfDay } from 'date-fns'
+import { useSearchParams } from 'react-router-dom'
 import { Header } from '../components/Header'
 import { RideCard } from '../components/RideCard'
 import { GroupedRideCard } from '../components/GroupedRideCard'
 import { OccurrenceOverrideModal } from '../components/OccurrenceOverrideModal'
+import { FilterChips } from '../components/FilterChips'
+import { SectionHead } from '../components/SectionHead'
+import { EmptyState } from '../components/EmptyState'
 import { Icon } from '../components/Icon'
 import { supabase } from '../lib/supabase'
 import { db } from '../lib/db'
@@ -16,7 +20,7 @@ import { getPref, PREF_HIDE_CANCELLED } from '../lib/prefs'
 import { fetchGoogleCalendars, fetchExternalEvents } from '../lib/googleCalendar'
 import { sortLegs } from '../lib/occurrences'
 import { copy } from '../copy'
-import { formatTime, formatWeekRange, formatDayLong, toIsoDate, toRideDirection } from '../lib/format'
+import { formatTime, formatWeekRange, formatDayTitle, toIsoDate, toRideDirection } from '../lib/format'
 import {
   blocksForRide,
   companionIdsOf,
@@ -34,15 +38,19 @@ type DisplayItem =
   | { kind: 'solo'; leg: LegRow; sortKey: string }
   | { kind: 'trip'; tripId: string; legs: LegRow[]; sortKey: string }
 
-export function Fuvartabla() {
+type RideFilter = 'open' | 'all' | 'mine'
+
+export function Rides() {
   const { person } = useAuth()
-  const { isAdmin, canAssignOthers, canSelfAssign, canEditOccurrence, canReleaseOwn, isFilteredView } = useRole()
+  const { isAdmin, canAssignOthers, canSelfAssign, canEditOccurrence, canReleaseOwn } = useRole()
   const { drivers, householdId, personById, locationById, locations, travelTimes } = useHousehold()
   const online = useOnlineStatus()
+  const [searchParams] = useSearchParams()
+  const highlightId = searchParams.get('ride')
   const [weekOffset, setWeekOffset] = useState(0)
   const [legs, setLegs] = useState<LegRow[]>([])
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState<'all' | 'mine'>('all')
+  const [filter, setFilter] = useState<RideFilter>(highlightId ? 'all' : 'open')
   const [mergeMode, setMergeMode] = useState(false)
   const [selectedLegIds, setSelectedLegIds] = useState<Set<string>>(new Set())
   const [merging, setMerging] = useState(false)
@@ -50,6 +58,8 @@ export function Fuvartabla() {
   const [selectedOcc, setSelectedOcc] = useState<Occurrence | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
   const [extEvents, setExtEvents] = useState<Array<{ calendar_id: string; starts_at: string; ends_at: string; title: string | null; person_id?: string }>>([])
+  const [highlight, setHighlight] = useState(highlightId)
+  const highlightRef = useRef<HTMLDivElement | null>(null)
 
   const hideCancelled = getPref(PREF_HIDE_CANCELLED)
   const today = new Date()
@@ -113,7 +123,7 @@ export function Fuvartabla() {
   useEffect(() => {
     if (!householdId) return
     const channel = supabase
-      .channel(`fuvartabla-rt-${householdId}`)
+      .channel(`rides-rt-${householdId}`)
       .on('postgres_changes' as never, {
         event: 'UPDATE', schema: 'public', table: 'transport_leg',
         filter: `household_id=eq.${householdId}`,
@@ -157,20 +167,33 @@ export function Fuvartabla() {
   }
 
   const myId = person?.id
-  const visLegs = (() => {
-    let ls = hideCancelled ? legs.filter(l => l.occurrence?.status !== 'cancelled') : legs
-    if (isFilteredView && myId) {
-      ls = ls.filter(l => l.driver_id === myId || l.companion_id === myId || l.companion2_id === myId)
-    }
-    return ls
-  })()
+  const visLegs = hideCancelled
+    ? legs.filter(l => l.occurrence?.status !== 'cancelled')
+    : legs
   const orphans = visLegs.filter(l => !l.driver_id && !l.self_transport && l.occurrence?.status !== 'cancelled')
-  const allAssigned = visLegs.length > 0 && orphans.length === 0
-  const bannerClass = allAssigned ? 'ok' : orphans.length ? 'warn' : 'neutral'
+  const mineCount = visLegs.filter(l =>
+    myId && (l.driver_id === myId || l.companion_id === myId || l.companion2_id === myId),
+  ).length
+
+  useEffect(() => {
+    if (filter === 'open' && orphans.length === 0 && visLegs.length > 0 && !highlightId) {
+      setFilter('all')
+    }
+  }, [orphans.length, visLegs.length, filter, highlightId])
+
+  useEffect(() => {
+    if (!highlight) return
+    const el = highlightRef.current ?? document.getElementById(`ride-${highlight}`)
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    const t = window.setTimeout(() => setHighlight(null), 1200)
+    return () => window.clearTimeout(t)
+  }, [highlight, loading])
 
   const grouped = days.map(d => {
     let dayLegs = visLegs.filter(l => l.depart_at.startsWith(toIsoDate(d)))
-    if (filter === 'mine' && myId) {
+    if (filter === 'open') {
+      dayLegs = dayLegs.filter(l => !l.driver_id && !l.self_transport)
+    } else if (filter === 'mine' && myId) {
       dayLegs = dayLegs.filter(l =>
         l.driver_id === myId || l.companion_id === myId || l.companion2_id === myId,
       )
@@ -188,7 +211,7 @@ export function Fuvartabla() {
       }
     }
     items.sort((a, b) => a.sortKey.localeCompare(b.sortKey))
-    return { date: d, label: formatDayLong(d), items }
+    return { date: d, label: formatDayTitle(d), items }
   })
 
   function toggleMergeMode() {
@@ -234,7 +257,13 @@ export function Fuvartabla() {
     }
 
     return (
-      <div key={leg.id} style={{ marginBottom: 8 }}>
+      <div
+        key={leg.id}
+        id={`ride-${leg.id}`}
+        ref={highlight === leg.id ? highlightRef : undefined}
+        className={highlight === leg.id ? 'ride-highlight' : undefined}
+        style={{ marginBottom: 8 }}
+      >
         <RideCard
           ride={leg}
           event={{ title: occ.title, locationName: fromLoc?.name }}
@@ -293,7 +322,13 @@ export function Fuvartabla() {
     })
 
     return (
-      <div key={tripId} style={{ marginBottom: 8 }}>
+      <div
+        key={tripId}
+        id={`ride-${sorted[0]?.id ?? tripId}`}
+        ref={sorted.some(l => l.id === highlight) ? highlightRef : undefined}
+        className={sorted.some(l => l.id === highlight) ? 'ride-highlight' : undefined}
+        style={{ marginBottom: 8 }}
+      >
         <GroupedRideCard
           trip={{ id: tripId }}
           stops={stops}
@@ -348,53 +383,48 @@ export function Fuvartabla() {
         }
       />
 
-      <div className={`status-banner ${bannerClass}`} style={{ margin: '12px 16px 0' }}>
-        {loading
-          ? copy.common.loading
-          : allAssigned
-            ? <><Icon name="check" size={16} weight="fill" /><span>{copy.rides.allAssigned}</span></>
-            : orphans.length > 0
-              ? <><Icon name="warning" size={16} weight="fill" /><span>{copy.rides.openThisWeek(orphans.length)}</span></>
-              : <span>{copy.rides.emptyAll}</span>}
-      </div>
-
       {mergeMode && (
         <div className="status-banner" style={{ margin: '10px 16px 0' }}>
           {copy.rides.mergeHint}
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 8, padding: '10px 16px 0' }}>
-        {(['all', 'mine'] as const).map(f => (
-          <button
-            key={f}
-            className={`week-nav-today${filter === f ? ' is-on' : ''}`}
-            onClick={() => setFilter(f)}
-            style={{
-              borderColor: filter === f ? 'var(--color-accent)' : undefined,
-              color: filter === f ? 'var(--color-accent-ink)' : undefined,
-            }}
-          >
-            {f === 'all' ? copy.rides.filterAll : copy.rides.filterMine}
-          </button>
-        ))}
-      </div>
+      <FilterChips
+        value={filter}
+        onChange={id => setFilter(id as RideFilter)}
+        chips={[
+          { id: 'open', label: copy.rides.chipOpen(orphans.length), count: orphans.length, tone: 'danger' },
+          { id: 'all', label: copy.rides.chipAll(visLegs.length), count: visLegs.length },
+          { id: 'mine', label: copy.rides.chipMine(mineCount), count: mineCount },
+        ]}
+      />
+
+      {loading && (
+        <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--color-muted)', fontSize: 13 }}>
+          {copy.common.loading}
+        </div>
+      )}
 
       {!loading && (
-        <div style={{ padding: '16px 16px calc(var(--nav-height) + 40px)' }}>
-          {grouped.every(g => g.items.length === 0) && (
-            <div className="empty-state">
-              <div className="icon"><Icon name="steering-wheel" size={40} weight="thin" color="#3a5670" /></div>
-              <div className="title">
-                {filter === 'mine' ? copy.rides.emptyMine : copy.empty.rides.title}
-              </div>
-              <div className="sub">{copy.empty.rides.sub}</div>
-            </div>
+        <div style={{ padding: '0 16px calc(var(--nav-height) + 40px)' }}>
+          {visLegs.length === 0 && (
+            <EmptyState icon="calendar-blank" title={copy.rides.emptyWeek} sub={copy.empty.week.sub} />
+          )}
+          {visLegs.length > 0 && grouped.every(g => g.items.length === 0) && filter === 'open' && (
+            <EmptyState icon="steering-wheel" title={copy.empty.rides.title} sub={copy.empty.rides.sub} />
+          )}
+          {visLegs.length > 0 && grouped.every(g => g.items.length === 0) && filter !== 'open' && (
+            <EmptyState
+              icon="funnel"
+              title={copy.empty.ridesFilter.title}
+              sub={copy.empty.ridesFilter.sub}
+              action={{ label: copy.rides.showAll, onClick: () => setFilter('all') }}
+            />
           )}
 
           {grouped.map(g => g.items.length > 0 && (
             <div key={g.date.toISOString()} style={{ marginBottom: 24 }}>
-              <div className="day-header">{g.label}</div>
+              <SectionHead variant="day" title={g.label} />
               {g.items.map(item =>
                 item.kind === 'solo'
                   ? renderSoloCard(item.leg)

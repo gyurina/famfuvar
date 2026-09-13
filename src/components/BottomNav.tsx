@@ -3,25 +3,22 @@ import { NavLink } from 'react-router-dom'
 import { useRole } from '../hooks/useRole'
 import { useOpenRides } from '../hooks/useOpenRides'
 import { copy } from '../copy'
-import { Icon, type IconName } from './Icon'
-
-const allTabs: { to: string; label: string; icon: IconName }[] = [
-  { to: '/',        label: copy.nav.today,    icon: 'sun-horizon' },
-  { to: '/fuvar',   label: copy.nav.rides,    icon: 'steering-wheel' },
-  { to: '/het',     label: copy.nav.week,     icon: 'calendar-blank' },
-  { to: '/esemeny', label: copy.nav.events,   icon: 'target' },
-  { to: '/sablon',  label: copy.nav.schedule, icon: 'clipboard' },
-]
+import { Icon } from './Icon'
+import { ROLE_THEME, tabsForRole } from '../roleTheme'
+import type { PersonRole } from '../types'
 
 export function BottomNav() {
-  const { canSeeSablon } = useRole()
+  const { role } = useRole()
   const from = startOfDay(new Date()).toISOString()
   const to = addDays(startOfDay(new Date()), 7).toISOString()
   const { total } = useOpenRides(from, to)
-  const tabs = allTabs.filter(t => t.to !== '/sablon' || canSeeSablon)
+  const tabs = tabsForRole(role)
+  const theme = ROLE_THEME[(role ?? 'child') as PersonRole]
+
+  if (tabs.length === 0) return null
 
   return (
-    <nav className="bottom-nav">
+    <nav className="bottom-nav" style={{ ['--nav-ink' as string]: theme.ink }}>
       {tabs.map(t => (
         <NavLink
           key={t.to}
@@ -33,7 +30,7 @@ export function BottomNav() {
             <>
               <span className="nav-icon">
                 <Icon name={t.icon} size={24} weight={isActive ? 'fill' : 'regular'} />
-                {t.to === '/fuvar' && total > 0 && (
+                {t.badge === 'openRides' && total > 0 && (
                   <span className="nav-badge" aria-label={copy.a11y.openRides(total)}>{total}</span>
                 )}
               </span>

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Header } from '../components/Header'
 import { supabase } from '../lib/supabase'
 import { useHousehold } from '../hooks/useHousehold'
+import { useRole } from '../hooks/useRole'
 import type { ScheduleTemplate, TravelGroup } from '../types'
 import { copy } from '../copy'
 import { formatShortDate, toIsoDate } from '../lib/format'
@@ -32,8 +33,9 @@ const EMPTY: FormData = {
   valid_from: toIsoDate(new Date()), valid_to: '',
 }
 
-export function Sablon() {
+export function Sablon({ embedded = false }: { embedded?: boolean }) {
   const { children, locations, householdId } = useHousehold()
+  const { canEditSchedule } = useRole()
   const [templates, setTemplates] = useState<ScheduleTemplate[]>([])
   const [groups, setGroups] = useState<TravelGroup[]>([])
   const [loading, setLoading] = useState(true)
@@ -182,7 +184,9 @@ export function Sablon() {
       <Header
         title={copy.schedule.title}
         subtitle={copy.schedule.subtitle}
-        action={
+        backTo={embedded ? '/egyeb' : undefined}
+        chrome={!embedded}
+        action={canEditSchedule ? (
           <button
             onClick={openNew}
             style={{
@@ -191,10 +195,10 @@ export function Sablon() {
               fontSize: 13, cursor: 'pointer', minHeight: 44, display: 'flex', alignItems: 'center', gap: 4,
             }}
           ><Icon name="plus" size={14} weight="bold" /> {copy.common.new}</button>
-        }
+        ) : undefined}
       />
 
-      {/* Horizon generator */}
+      {canEditSchedule && (
       <div style={{ margin: '12px 16px 0', padding: '12px 14px', borderRadius: 'var(--r-md)', background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
           <div>
@@ -224,6 +228,7 @@ export function Sablon() {
           }}>{genResult}</div>
         )}
       </div>
+      )}
 
       {loading && (
         <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--color-muted)', fontSize: 13 }}>
@@ -253,8 +258,8 @@ export function Sablon() {
                   <div
                     key={t.id}
                     className="leg-card"
-                    style={{ display: 'flex', marginBottom: 8, cursor: 'pointer' }}
-                    onClick={() => openEdit(t)}
+                    style={{ display: 'flex', marginBottom: 8, cursor: canEditSchedule ? 'pointer' : 'default' }}
+                    onClick={() => { if (canEditSchedule) openEdit(t) }}
                   >
                     <div className="leg-card-stripe" style={{ background: stripeColor }} />
                     <div className="leg-card-body">

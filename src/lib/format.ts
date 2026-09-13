@@ -52,6 +52,12 @@ export function formatDayLong(date: Date | string): string {
   return format(d, 'EEEE, MMMM d.', { locale: hu })
 }
 
+/** „Hétfő, szeptember 14.” — napcím a Héten. */
+export function formatDayTitle(date: Date | string): string {
+  const s = formatDayLong(date)
+  return s.charAt(0).toUpperCase() + s.slice(1)
+}
+
 /** „szept. 14 – 20.” */
 export function formatWeekRange(from: Date | string, to: Date | string): string {
   const a = asDate(from)

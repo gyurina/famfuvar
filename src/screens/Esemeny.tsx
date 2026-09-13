@@ -207,7 +207,7 @@ export function Esemeny() {
 
   return (
     <div style={{ background: 'var(--color-bg)', minHeight: '100dvh' }}>
-      <Header title={copy.events.title} subtitle={copy.events.subtitle} />
+      <Header title={copy.events.title} subtitle={copy.events.subtitle} backTo="/het" chrome={false} />
 
       {!loading && events.length === 0 && !showForm && (
         <div className="empty-state" style={{ marginTop: 48 }}>

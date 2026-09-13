@@ -82,7 +82,7 @@ export function Ma() {
 
   return (
     <div style={{ background: 'var(--color-bg)', minHeight: '100dvh' }}>
-      <Header title={copy.ma.title} subtitle={todayDisplay} />
+      <Header title={copy.ma.title} kicker={todayDisplay} />
 
       <div className={`status-banner ${hasIssue ? 'warn' : 'ok'}`} style={{ margin: '12px 16px 0' }}>
         {hasIssue

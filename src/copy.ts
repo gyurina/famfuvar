@@ -92,6 +92,8 @@ export const copy = {
 
   a11y: {
     settings: 'Beállítások',
+    profile: 'Profil',
+    back: 'Vissza',
     messages: 'Üzenetek',
     prevWeek: 'Előző hét',
     nextWeek: 'Következő hét',
@@ -202,6 +204,11 @@ export const copy = {
       n === 1 ? 'Egy fuvarra nincs sofőr ezen a héten' : `${n} fuvarra nincs sofőr ezen a héten`,
     emptyMine: 'Neked nincs fuvarod ezen a héten',
     emptyAll: 'Nincs fuvar ezen a héten',
+    emptyWeek: 'Ezen a héten nincs fuvar',
+    chipOpen: (n: number) => `Nincs sofőr · ${n}`,
+    chipAll: (n: number) => `Mind · ${n}`,
+    chipMine: (n: number) => `Enyém · ${n}`,
+    showAll: 'Mutasd mindet',
     travelMins: (n: number) => `~${n} perc`,
     pickDriver: 'Válassz sofőrt',
     swap: 'Csere',
@@ -224,11 +231,16 @@ export const copy = {
     title: 'Hét',
     emptyTitle: 'Ezen a héten nincs program',
     emptySub: 'Tanítási szünet van?',
+    emptyToday: 'Ma nincs program',
     noDriver: 'nincs sofőr',
     person: 'Személy',
     editCancel: 'Módosítás / Lemondás',
     dropHere: 'Ide',
     dropHereHint: 'Ide húzva',
+    assign: 'Kiosztom',
+    programCount: (n: number) => (n === 1 ? '1 program' : `${n} program`),
+    togetherWith: (name: string) => `${name}vel együtt`,
+    bothWaysSelf: 'Oda és vissza is',
   },
 
   events: {
@@ -481,6 +493,38 @@ export const copy = {
     long: ['Hétfő', 'Kedd', 'Szerda', 'Csütörtök', 'Péntek', 'Szombat', 'Vasárnap'] as const,
     short: ['H', 'K', 'Sze', 'Cs', 'P', 'Szo', 'V'] as const,
     mid: ['Hétf', 'Kedd', 'Szer', 'Csüt', 'Pént', 'Szom', 'Vasá'] as const,
+  },
+
+  more: {
+    title: 'Egyéb',
+    familyLife: 'A család élete',
+    app: 'Alkalmazás',
+    schedule: 'Órarend',
+    scheduleSub: (n: number, last: string) =>
+      n === 1 ? `1 heti program · legutóbb ${last}` : `${n} heti program · legutóbb ${last}`,
+    scheduleSubNone: 'Még nincs heti program',
+    breaks: 'Szünetek és betegség',
+    breaksNone: 'Nincs aktív szünet',
+    breaksActive: (name: string, until: string) => `${name} beteg — ${until}`,
+    family: 'Család',
+    familySub: (people: number, drivers: number, children: number) =>
+      `${people} fő · ${drivers} sofőr · ${children} gyerek`,
+    places: 'Helyszínek és útidők',
+    placesSub: (places: number, missing: number) =>
+      missing > 0
+        ? `${places} helyszín · ${missing} útidő hiányzik`
+        : `${places} helyszín`,
+    notifications: 'Értesítések',
+    notificationsOn: 'Bekapcsolva ezen az eszközön',
+    notificationsOff: 'Kikapcsolva',
+    google: 'Google Naptár',
+    googleSub: (n: number) =>
+      n === 0 ? 'Nincs csatlakoztatva' : n === 1 ? '1 naptár összekötve' : `${n} naptár összekötve`,
+    hideCancelled: 'Elmaradt programok elrejtése',
+    signOut: 'Kijelentkezés',
+    version: (v: string) => `Fuvarszervező · v${v}`,
+    roleHousehold: (role: string, household: string) => `${role} · ${household}`,
+    accusativeLabel: 'Tárgyeset',
   },
 
   and: 'és',

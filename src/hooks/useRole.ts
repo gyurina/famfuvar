@@ -35,5 +35,7 @@ export function useRole() {
     canEditSchedule:   isAdmin,
     canEditHousehold:  isAdmin,
     seesEverything:    !isBabysitter,
+    canSeeRides:       isAdmin,
+    canSeeMore:        !isChild,
   }
 }

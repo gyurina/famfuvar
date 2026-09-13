@@ -3,6 +3,7 @@ import { Header } from '../components/Header'
 import { supabase } from '../lib/supabase'
 import { useHousehold } from '../hooks/useHousehold'
 import { useAuth } from '../lib/auth'
+import { useRole } from '../hooks/useRole'
 import { getPref, setPref, PREF_HIDE_CANCELLED } from '../lib/prefs'
 import type { ExternalCalendar, Location, TravelTime, DriverAvailability, UnavailableBlock, TravelGroup, TravelGroupMember, PushLog, BreakPeriod, BreakReason, PersonRole } from '../types'
 import { isPushSupported, isPushSubscribed, subscribeToPush, unsubscribeFromPush } from '../lib/push'
@@ -12,6 +13,25 @@ import { copy } from '../copy'
 import { formatShortDate, formatDateTime } from '../lib/format'
 import { Icon } from '../components/Icon'
 type Tab = 'helyszin' | 'utido' | 'elerheto' | 'nem_elerheto' | 'csoportok' | 'szunetek' | 'naptarak' | 'push' | 'diagnozis'
+export type SettingsSection = 'helyszinek' | 'szunetek' | 'ertesitesek'
+
+const SECTION_TABS: Record<SettingsSection, Tab[]> = {
+  helyszinek: ['helyszin', 'utido'],
+  szunetek: ['szunetek'],
+  ertesitesek: ['push', 'naptarak'],
+}
+
+const SECTION_DEFAULT: Record<SettingsSection, Tab> = {
+  helyszinek: 'helyszin',
+  szunetek: 'szunetek',
+  ertesitesek: 'push',
+}
+
+const SECTION_TITLE: Record<SettingsSection, string> = {
+  helyszinek: copy.settings.tabs.locations,
+  szunetek: copy.settings.tabs.absences,
+  ertesitesek: copy.more.notifications,
+}
 
 const inp: React.CSSProperties = {
   width: '100%', padding: '6px 10px', borderRadius: 8, fontSize: 13,
@@ -33,8 +53,9 @@ const btnDanger: React.CSSProperties = {
   border: '1px solid #7f1d1d', cursor: 'pointer', minHeight: 34,
 }
 
-export function Beallitasok() {
+export function Beallitasok({ section }: { section?: SettingsSection } = {}) {
   const { signOut, person } = useAuth()
+  const { canEditHousehold } = useRole()
   const {
     persons, drivers,
     locations: initLocations,
@@ -43,7 +64,7 @@ export function Beallitasok() {
     householdId,
   } = useHousehold()
 
-  const [tab, setTab] = useState<Tab>('helyszin')
+  const [tab, setTab] = useState<Tab>(section ? SECTION_DEFAULT[section] : 'helyszin')
   const [extCals, setExtCals] = useState<ExternalCalendar[]>([])
   const [hideCancelled, setHideCancelled] = useState(() => getPref(PREF_HIDE_CANCELLED))
 
@@ -235,7 +256,7 @@ export function Beallitasok() {
     setPref(PREF_HIDE_CANCELLED, v)
   }
 
-  const tabs: { key: Tab; label: string }[] = [
+  const allTabs: { key: Tab; label: string }[] = [
     { key: 'helyszin', label: copy.settings.tabs.locations },
     { key: 'utido',    label: copy.settings.tabs.travel },
     { key: 'elerheto', label: copy.settings.tabs.available },
@@ -246,6 +267,9 @@ export function Beallitasok() {
     { key: 'push',      label: copy.settings.tabs.message },
     { key: 'diagnozis', label: copy.settings.tabs.diagnose },
   ]
+  const tabs = section
+    ? allTabs.filter(t => SECTION_TABS[section].includes(t.key))
+    : allTabs
 
   // ── Helyszínek state ──
   const [editLocId, setEditLocId] = useState<string | null>(null)
@@ -758,8 +782,13 @@ export function Beallitasok() {
 
   return (
     <div style={{ background: 'var(--color-bg)', minHeight: '100dvh' }}>
-      <Header title={copy.settings.title} />
+      <Header
+        title={section ? SECTION_TITLE[section] : copy.settings.title}
+        backTo={section ? '/egyeb' : undefined}
+        chrome={!section}
+      />
 
+      {!section && (
       <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--color-border)' }}>
         <div className="section-label" style={{ marginBottom: 10 }}>{copy.settings.appearance}</div>
         <div style={{
@@ -826,8 +855,9 @@ export function Beallitasok() {
           </div>
         )}
       </div>
+      )}
 
-      {/* Belső tab sor */}
+      {tabs.length > 1 && (
       <div style={{ display: 'flex', gap: 4, padding: '12px 16px', overflowX: 'auto',
                     borderBottom: '1px solid var(--color-border)' }}>
         {tabs.map(t => (
@@ -842,6 +872,7 @@ export function Beallitasok() {
           </button>
         ))}
       </div>
+      )}
 
       <div style={{ padding: '16px 16px calc(var(--nav-height) + 40px)' }}>
 
@@ -949,12 +980,12 @@ export function Beallitasok() {
                   <button style={btnGhost} onClick={() => { setNewLocOpen(false); setLocError(null) }}>{copy.common.cancel}</button>
                 </div>
               </div>
-            ) : (
+            ) : canEditHousehold ? (
               <button onClick={() => setNewLocOpen(true)} style={{
                 ...btnGhost, width: '100%', borderStyle: 'dashed', borderColor: 'var(--color-blue)',
                 color: 'var(--color-blue)', fontSize: 13,
               }}>{copy.settings.newLocation}</button>
-            )}
+            ) : null}
           </div>
         )}
 
@@ -1063,12 +1094,12 @@ export function Beallitasok() {
                   <button style={btnGhost} onClick={() => { setNewTTOpen(false); setTTError(null) }}>{copy.common.cancel}</button>
                 </div>
               </div>
-            ) : (
+            ) : canEditHousehold ? (
               <button onClick={() => setNewTTOpen(true)} style={{
                 ...btnGhost, width: '100%', borderStyle: 'dashed', borderColor: 'var(--color-blue)',
                 color: 'var(--color-blue)', fontSize: 13,
               }}>{copy.settings.newRoute}</button>
-            )}
+            ) : null}
           </div>
         )}
 
@@ -1808,7 +1839,8 @@ export function Beallitasok() {
           </div>
         )}
 
-        {/* Verzió */}
+        {!section && (
+          <>
         <div style={{ marginTop: 24, textAlign: 'center' }}>
           <span style={{
             display: 'inline-block', fontSize: 11, color: 'var(--color-muted)',
@@ -1819,7 +1851,6 @@ export function Beallitasok() {
           </span>
         </div>
 
-        {/* Kijelentkezés */}
         <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--color-border)' }}>
           <button onClick={signOut} style={{
             width: '100%', borderRadius: 12, padding: '12px 0', fontSize: 13,
@@ -1829,6 +1860,8 @@ export function Beallitasok() {
             {copy.settings.signOut}
           </button>
         </div>
+          </>
+        )}
       </div>
     </div>
   )
