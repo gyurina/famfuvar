@@ -2,6 +2,7 @@
 // RFC 8291 Web Push + VAPID (JWK kulcsimport)
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { sendWithRetry } from '../_shared/pushSend.ts'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -186,7 +187,15 @@ Deno.serve(async (req: Request) => {
     .single()
   const logId = logRow?.id ?? null
 
-  const notifPayload = JSON.stringify({ title, body: body ?? '', url: '/?inbox=1', log_id: logId, supabase_url: supabaseUrl })
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
+  const notifPayload = JSON.stringify({
+    title,
+    body: body ?? '',
+    url: '/?inbox=1',
+    log_id: logId,
+    supabase_url: supabaseUrl,
+    apikey: anonKey,
+  })
 
   const results = await Promise.allSettled(
     subs.map(async (sub) => {
@@ -196,16 +205,12 @@ Deno.serve(async (req: Request) => {
         stage = 'encrypt'
         const encBody = await encryptWebPush(notifPayload, sub.p256dh, sub.auth)
         stage = 'fetch'
-        const res = await fetch(sub.endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Encoding': 'aes128gcm',
-            'Content-Type':     'application/octet-stream',
-            'Content-Length':   String(encBody.length),
-            'TTL':              '86400',
-            'Authorization':    authHeader,
-          },
-          body: encBody,
+        const res = await sendWithRetry(sub.endpoint, encBody, {
+          'Content-Encoding': 'aes128gcm',
+          'Content-Type':     'application/octet-stream',
+          'Content-Length':   String(encBody.length),
+          'TTL':              '86400',
+          'Authorization':    authHeader,
         })
         if (!res.ok) {
           const txt = await res.text().catch(() => '')

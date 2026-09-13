@@ -34,7 +34,7 @@ const btnDanger: React.CSSProperties = {
 }
 
 export function Beallitasok() {
-  const { signOut } = useAuth()
+  const { signOut, person } = useAuth()
   const {
     persons, drivers,
     locations: initLocations,
@@ -94,6 +94,34 @@ export function Beallitasok() {
   const [pushLogs, setPushLogs] = useState<PushLog[]>([])
   const [pushLogsLoading, setPushLogsLoading] = useState(false)
 
+  async function refreshPushLogs() {
+    if (!householdId) return
+    setPushLogsLoading(true)
+    const { data: logs } = await supabase.from('push_log')
+      .select('id, title, body, sent_at, target_count, sent_count, failed_count, sent_by')
+      .eq('household_id', householdId)
+      .order('sent_at', { ascending: false })
+      .limit(10)
+    if (!logs?.length) { setPushLogs([]); setPushLogsLoading(false); return }
+    const logIds = logs.map(l => l.id)
+    const { data: receipts } = await supabase
+      .from('push_log_receipt')
+      .select('log_id, event')
+      .in('log_id', logIds)
+    const countMap: Record<string, { delivered: number; clicked: number }> = {}
+    for (const r of receipts ?? []) {
+      if (!countMap[r.log_id]) countMap[r.log_id] = { delivered: 0, clicked: 0 }
+      if (r.event === 'delivered') countMap[r.log_id].delivered++
+      if (r.event === 'clicked') countMap[r.log_id].clicked++
+    }
+    setPushLogs(logs.map(l => ({
+      ...l,
+      delivered_count: countMap[l.id]?.delivered ?? 0,
+      clicked_count:   countMap[l.id]?.clicked   ?? 0,
+    })) as PushLog[])
+    setPushLogsLoading(false)
+  }
+
   async function sendCustomPush() {
     if (!householdId || !pushTitle.trim()) return
     setPushSending(true)
@@ -113,12 +141,14 @@ export function Beallitasok() {
             person_ids: pushTargetIds,
             title: pushTitle.trim(),
             body: pushBody.trim(),
+            sent_by: person?.id ?? null,
           }),
         }
       )
       const json = await res.json()
       setPushResult(`✓ Elküldve ${json.sent ?? 0} eszközre${json.failed ? ` (${json.failed} hiba)` : ''}`)
       setPushTitle(''); setPushBody(''); setPushTargetIds([])
+      await refreshPushLogs()
     } catch (e) {
       setPushResult(`❌ Hiba: ${String(e)}`)
     }
@@ -127,33 +157,7 @@ export function Beallitasok() {
 
   useEffect(() => {
     if (!householdId || tab !== 'push') return
-    setPushLogsLoading(true)
-    supabase.from('push_log')
-      .select('id, title, body, sent_at, target_count, sent_count, failed_count, sent_by')
-      .eq('household_id', householdId)
-      .order('sent_at', { ascending: false })
-      .limit(10)
-      .then(async ({ data: logs }) => {
-        if (!logs?.length) { setPushLogs([]); setPushLogsLoading(false); return }
-        // Count delivered/clicked from receipts
-        const logIds = logs.map(l => l.id)
-        const { data: receipts } = await supabase
-          .from('push_log_receipt')
-          .select('log_id, event')
-          .in('log_id', logIds)
-        const countMap: Record<string, { delivered: number; clicked: number }> = {}
-        for (const r of receipts ?? []) {
-          if (!countMap[r.log_id]) countMap[r.log_id] = { delivered: 0, clicked: 0 }
-          if (r.event === 'delivered') countMap[r.log_id].delivered++
-          if (r.event === 'clicked') countMap[r.log_id].clicked++
-        }
-        setPushLogs(logs.map(l => ({
-          ...l,
-          delivered_count: countMap[l.id]?.delivered ?? 0,
-          clicked_count:   countMap[l.id]?.clicked   ?? 0,
-        })) as PushLog[])
-        setPushLogsLoading(false)
-      })
+    refreshPushLogs()
   }, [householdId, tab])
 
   useEffect(() => { setLocations(initLocations) }, [initLocations])

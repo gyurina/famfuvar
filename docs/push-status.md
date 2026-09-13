@@ -1,10 +1,10 @@
 # Push értesítés — állapotjelentés és robusztusítási terv
 
-> famcal v0.6.3 · 2026-09-12
+> famcal v0.9.1 · 2026-09-13 · branch `fix/push-receipt`
 
 ---
 
-## 1. Küldési tesztek összefoglalója
+## 1. Küldési tesztek összefoglalója (2026-09-12)
 
 | Üzenet  | Idő   | Cél | Küldve | Megérkezett | Megnyitva | Megjegyzés |
 |---------|-------|-----|--------|-------------|-----------|------------|
@@ -13,112 +13,106 @@
 | HELLOKA | 21:13 | 2   | 1/2    | 0           | 0         | 1 lejárt sub törölve (410 Gone) ✓ |
 | asasas  | 21:18 | 3   | 2/3    | 0           | 0         | Új sub regisztrálva, payload-URL fix nem éles |
 
-**Összesítve: 4 teszt, 0 visszaigazolt kézbesítés — a küldés működik, a visszajelzési csatorna nem.**
+**Akkor: 4 teszt, 0 visszaigazolt kézbesítés — a küldés működött, a visszajelzési csatorna nem.**
 
 ---
 
 ## 2. Gyökérokok
 
 ### #1 — postMessage nem éri el a háttér SW-t ✅ javítva
-Az eredeti kód `self.__SUPABASE_URL__`-t postMessage-gel kapta az app-tól. Push háttérben érkezik → URL = `undefined` → fetch el sem indul.  
-**Fix:** `notify-custom` a VAPID payloadba sütötte a `supabase_url`-t.
+Az eredeti kód `self.__SUPABASE_URL__`-t postMessage-gel kapta az app-tól. Push háttérben érkezik → URL = `undefined` → fetch el sem indul.
+**Fix:** `notify-custom` / `notify-driver` a VAPID payloadba sütötte a `supabase_url`-t.
 
 ### #2 — Cache API: időzítési függőség ✅ felülírva
-`caches.open('app-config')` csak akkor tartalmaz URL-t, ha az új build után a user újra subscribált. Régi SW + régi sub → üres cache → silent fail.  
+`caches.open('app-config')` csak akkor tartalmaz URL-t, ha az új build után a user újra subscribált.
 **Fix:** Payload-os megoldás feleslegessé tette.
 
 ### #3 — Lejárt push subscription nem törlődött ✅ javítva
-410 Gone → endpoint érvénytelen, de DB-ben maradt → minden küldésnél visszatérő `1 hiba`.  
-**Fix:** `notify-custom` 410/404-re `push_subscription.delete()`-et hív.
+410 Gone → endpoint érvénytelen, de DB-ben maradt.
+**Fix:** `notify-custom` és `notify-driver` 410/404-re `push_subscription.delete()`-et hív.
 
-### #4 — push-receipt Edge Function valószínűleg nincs deployolva ⚠ blokkoló
-SW POST-ja `push-receipt`-re megy. Ha nincs deploy, 404-et kap; `catch(() => {})` elnyeli → silent fail.  
-**Fix:** `supabase functions deploy push-receipt`
+### #4 — push-receipt nincs deployolva ❌ téves gyanú
+2026-09-13 éles probe: `OPTIONS /functions/v1/push-receipt` → 204, `x-served-by: supabase-edge-runtime`. A tábla is létezik (dummy UUID → FK `push_log_receipt_log_id_fkey`).
 
-### #5 — Régi service worker még aktív ⚠ ellenőrizni
-`skipWaiting()` benne van, de tab-bezárás / reload szükséges az aktiváláshoz.  
-**Fix:** DevTools → Application → Service Workers → Update
+### #5 — Régi service worker ⚠ továbbra is ellenőrizni
+`skipWaiting()` + `SW_VERSION` a DevTools konzolban: `[SW] v0.9.1 aktív`.
 
----
+### #6 — SW POST auth nélkül → 401 ✅ ez volt a blokkoló (2026-09-13)
+A Service Worker `reportPushReceipt` **nem küldött** `Authorization` / `apikey` headert. A gateway JWT-t vár:
 
-## 3. Jelenlegi architektúra (v0.6.3)
+`UNAUTHORIZED_NO_AUTH_HEADER` → 401, a function el sem indul. A SW `catch` elnyelte.
 
-```
-notify-custom → push_log INSERT (logId)
-             → VAPID payload: { title, body, log_id, supabase_url, url: '/?inbox=1' }
-             → POST → eszköz endpoint
-             → 410/404 → push_subscription DELETE
-             → push_log UPDATE { sent_count, failed_count }
+A háttér-SW-nek nincs user sessionje, ezért:
 
-sw.js push:           data.supabase_url → reportPushReceipt(log_id, 'delivered')
-sw.js click:  notification.data.supabase_url → reportPushReceipt(log_id, 'clicked')
-              → clients.openWindow('/?inbox=1')
+1. **Réteg 1:** `push-receipt` `verify_jwt = false` (`supabase/config.toml` + deploy `--no-verify-jwt`) — a már kint lévő SW azonnal tud receiptet írni.
+2. **Réteg 2:** a payloadban megy a publikus `apikey`, az SW `Authorization: Bearer` + `apikey` headert küld, hogy a JWT később visszatehető legyen.
 
-push-receipt → push_log_receipt INSERT (service_role, RLS bypass)
-```
+Hamis receipthez ismert `log_id` UUID kell (FK a `push_log`-ra).
 
 ---
 
-## 4. Deploy teendők (egyszeri)
+## 3. Jelenlegi architektúra (v0.9.1)
+
+```
+notify-custom / notify-driver
+  → push_log INSERT (logId)
+  → VAPID payload: { title, body, log_id, supabase_url, apikey, url }
+  → POST (429 retry, max 3) → eszköz endpoint
+  → 410/404 → push_subscription DELETE
+  → push_log UPDATE { sent_count, failed_count }
+
+sw.js push:  data.supabase_url + apikey → reportPushReceipt(log_id, 'delivered')
+sw.js click: notification.data → reportPushReceipt(log_id, 'clicked')
+             → clients.openWindow(url)
+
+push-receipt (verify_jwt = false)
+  → push_log_receipt INSERT (service_role)
+  → ismeretlen log_id → 404 (nem 500 FK)
+```
+
+`sent_count` = a push-szerver 2xx ACK-ja (FCM jellemzően 201). Ez **nem** user-visible delivered; azt a SW receipt méri.
+
+---
+
+## 4. Deploy teendők
 
 ```powershell
-git push origin main
-supabase db push                           # push_log + push_log_receipt táblák
-supabase functions deploy push-receipt     # ← kritikus
-supabase functions deploy notify-custom    # supabase_url payloadban
-npm run build                              # új sw.js
-# DevTools → Application → Service Workers → Update → reload
+# a fix/push-receipt worktree-ből:
+supabase functions deploy push-receipt --no-verify-jwt
+supabase functions deploy notify-custom
+supabase functions deploy notify-driver
+# frontend (új sw.js) a következő Vercel deploy-nál
+```
+
+Elfogadás: auth nélküli POST dummy UUID-ra **ne 401 legyen**, hanem 404 `unknown log_id`.
+
+```powershell
+curl -X POST https://<project>.supabase.co/functions/v1/push-receipt `
+  -H "Content-Type: application/json" `
+  -d '{"log_id":"00000000-0000-0000-0000-000000000000","event":"delivered","user_agent":"test"}'
+# Elvárt: 404 {"error":"unknown log_id"}
+# 401 = JWT még mindig be van kapcsolva
 ```
 
 ---
 
-## 5. Robusztusítási javaslatok (jövőbeli sprint)
+## 5. Robusztusítási javaslatok
 
-### 5a. Server-side delivered flag (SW-független)
-A push szerver 201-es ACK-ja jelzi, hogy az üzenet megérkezett az eszközhöz. Megbízhatóbb, mint a SW callback.
-```sql
-alter table push_log add column server_ack_count int not null default 0;
--- notify-custom: res.status === 201 → server_ack_count++
-```
+### 5a. Server-side delivered flag — nem kell
+A `sent_count` már a push-szerver ACK. Nem egyenlő a user-visible delivereddel.
 
-### 5b. Retry exponential backoff-fal (429 kezelés)
-```typescript
-async function sendWithRetry(endpoint, body, headers, attempts = 3) {
-  for (let i = 0; i < attempts; i++) {
-    const res = await fetch(endpoint, { method: 'POST', headers, body })
-    if (res.ok || res.status === 410 || res.status === 404) return res
-    if (res.status === 429 && i < attempts - 1) {
-      await new Promise(r => setTimeout(r, 1000 * (i + 1)))
-      continue
-    }
-    return res
-  }
-}
-```
+### 5b. Retry 429-re ✅ kész
+`supabase/functions/_shared/pushSend.ts` — max 3 próba, 1s / 2s várakozás.
 
-### 5c. SW receipt: hiba logolása (ne nyeld el csendben)
-```javascript
-} catch (e) {
-  console.error('[SW] push-receipt fetch failed:', e)
-}
-```
+### 5c. SW receipt hiba logolása ✅ kész
+`console.error('[SW] push-receipt …')` HTTP és network hibára.
 
-### 5d. Subscription health check (hetente)
-Hetente egyszer egy Edge Function pingeli az összes sub-ot (TTL=0), 410-eseket törli. Nem kell várni a következő küldésig.
+### 5d. Subscription health check (hetente) — később
+Hetente TTL=0 ping, 410-esek törlése. Nem ebben a sprintben.
 
 ---
 
 ## 6. Automatizált tesztelhetőség
-
-### push-receipt közvetlenül tesztelhető curl-lel
-```bash
-curl -X POST https://<project>.supabase.co/functions/v1/push-receipt \
-  -H "Content-Type: application/json" \
-  -d '{"log_id":"<valós-push-log-id>","event":"delivered","user_agent":"test"}'
-# Elvárt: {"ok":true}
-# Ha 404: function nincs deployolva
-# Ha 500: push_log_receipt tábla hiányzik (supabase db push)
-```
 
 ### Küldés utáni DB query
 ```sql
@@ -131,12 +125,8 @@ order by l.sent_at desc
 limit 5;
 ```
 
-### SW verzió konstans (DevTools-ban ellenőrizhető)
-```javascript
-// sw.js tetején:
-const SW_VERSION = '0.6.3'
-self.addEventListener('activate', () => console.log(`[SW] v${SW_VERSION} aktív`))
-```
+### SW verzió
+DevTools → Application → Service Workers, konzol: `[SW] v0.9.1 aktív`
 
 ---
 
@@ -144,15 +134,15 @@ self.addEventListener('activate', () => console.log(`[SW] v${SW_VERSION} aktív`
 
 | Komponens | Állapot | Teendő |
 |---|---|---|
-| VAPID küldés | ✅ működik | — |
-| push_log rögzítés | ✅ működik | — |
-| Lejárt sub auto-törlés | ✅ működik | — |
-| push-receipt function kód | ✅ kész | deploy! |
-| SW receipt callback | ✅ kód kész | deploy + SW update |
-| push_log_receipt tábla | ⚠ migration | supabase db push |
-| delivered/clicked számlálás | ❌ 0 | fentiek után tesztelendő |
-| push inbox UI (🔔) | ✅ kész | v0.5.0 |
+| VAPID küldés | működik | — |
+| push_log rögzítés | működik | — |
+| Lejárt sub auto-törlés | működik (custom + driver) | — |
+| push-receipt function | deployolva | `verify_jwt = false` |
+| SW receipt callback | apikey + error log | frontend deploy + SW update |
+| push_log_receipt tábla | létezik | — |
+| delivered/clicked számlálás | a 401 volt a ok | éles próba a JWT-off után |
+| push inbox UI | kész | v0.5.0 |
 
 ---
 
-*A rendszer elvben teljes és helyes. A 0-ás számok valószínűleg deploy-hiányból adódnak, nem logikai hibából. A curl teszt és a DB query az élesítés után azonnal megmondja, melyik lépésnél akad el.*
+*A 0-ás számok oka a gateway 401 volt, nem a hiányzó deploy. JWT-off + SW apikey után a curl és a fenti SQL megmondja, hogy a receipt-csatorna él.*

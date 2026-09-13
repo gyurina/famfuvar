@@ -1,0 +1,14 @@
+# FamCal — Edge Function JWT policy
+# push-receipt is invoked from the Service Worker without a user session.
+
+project_id = "famcal"
+
+[functions.push-receipt]
+enabled = true
+verify_jwt = false
+
+[functions.notify-custom]
+verify_jwt = true
+
+[functions.notify-driver]
+verify_jwt = true
