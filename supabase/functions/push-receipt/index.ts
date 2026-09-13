@@ -32,20 +32,22 @@ Deno.serve(async (req: Request) => {
   const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   const supabase    = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } })
 
-  // Opcionálisan: JWT-ből kinyerjük az auth_user_id-t → person_id
+  // User JWT → person_id. Skip publishable/anon keys (sb_… or non-JWT).
   if (!personId) {
     const authHeader = req.headers.get('Authorization')
-    if (authHeader?.startsWith('Bearer ')) {
-      const token = authHeader.slice(7)
-      const { data: { user } } = await supabase.auth.getUser(token)
-      if (user) {
-        const { data: p } = await supabase
-          .from('person')
-          .select('id')
-          .eq('auth_user_id', user.id)
-          .maybeSingle()
-        personId = p?.id ?? null
-      }
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : ''
+    if (token && !token.startsWith('sb_') && token.split('.').length === 3) {
+      try {
+        const { data: { user } } = await supabase.auth.getUser(token)
+        if (user) {
+          const { data: p } = await supabase
+            .from('person')
+            .select('id')
+            .eq('auth_user_id', user.id)
+            .maybeSingle()
+          personId = p?.id ?? null
+        }
+      } catch { /* ignore invalid/expired tokens */ }
     }
   }
 
@@ -58,6 +60,10 @@ Deno.serve(async (req: Request) => {
 
   if (error) {
     console.error('push-receipt insert error:', error.message)
+    // Unknown log_id → FK violation; do not leak as 500
+    if (error.code === '23503') {
+      return new Response(JSON.stringify({ error: 'unknown log_id' }), { status: 404, headers: JSON_CORS })
+    }
     return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: JSON_CORS })
   }
 

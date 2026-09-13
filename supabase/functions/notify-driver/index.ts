@@ -2,6 +2,7 @@
 // RFC 8291 Web Push + VAPID (JWK kulcsimport)
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { sendWithRetry } from '../_shared/pushSend.ts'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -173,10 +174,29 @@ Deno.serve(async (req: Request) => {
   const occ       = leg.occurrence as { title: string; on_date: string; starts_at: string }
   const direction = leg.direction === 'dropoff' ? 'Elvitel' : 'Hazahozatal'
   const timeStr   = occ.starts_at?.slice(0, 5) ?? '?'
+  const title     = `🚗 Fuvar: ${occ.title}`
+  const body      = `${direction} · ${occ.on_date} ${timeStr}`
+
+  const { data: logRow } = await supabase
+    .from('push_log')
+    .insert({
+      household_id: leg.household_id,
+      title,
+      body,
+      target_count: subs.length,
+    })
+    .select('id')
+    .single()
+  const logId = logRow?.id ?? null
+
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
   const notifPayload = JSON.stringify({
-    title: `🚗 Fuvar: ${occ.title}`,
-    body:  `${direction} · ${occ.on_date} ${timeStr}`,
-    url:   '/fuvartabla',
+    title,
+    body,
+    url: '/fuvar',
+    log_id: logId,
+    supabase_url: supabaseUrl,
+    apikey: anonKey,
   })
 
   const results = await Promise.allSettled(
@@ -187,19 +207,18 @@ Deno.serve(async (req: Request) => {
         stage = 'encrypt'
         const encBody = await encryptWebPush(notifPayload, sub.p256dh, sub.auth)
         stage = 'fetch'
-        const res = await fetch(sub.endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Encoding': 'aes128gcm',
-            'Content-Type':     'application/octet-stream',
-            'Content-Length':   String(encBody.length),
-            'TTL':              '86400',
-            'Authorization':    authHeader,
-          },
-          body: encBody,
+        const res = await sendWithRetry(sub.endpoint, encBody, {
+          'Content-Encoding': 'aes128gcm',
+          'Content-Type':     'application/octet-stream',
+          'Content-Length':   String(encBody.length),
+          'TTL':              '86400',
+          'Authorization':    authHeader,
         })
         if (!res.ok) {
           const txt = await res.text().catch(() => '')
+          if (res.status === 410 || res.status === 404) {
+            await supabase.from('push_subscription').delete().eq('endpoint', sub.endpoint)
+          }
           throw new Error(`HTTP ${res.status}: ${txt}`)
         }
       } catch (e) {
@@ -212,7 +231,10 @@ Deno.serve(async (req: Request) => {
   const failed = results.filter(r => r.status === 'rejected').length
   const errors = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected')
                         .map(r => r.reason?.message ?? String(r.reason))
+  if (logId) {
+    await supabase.from('push_log').update({ sent_count: sent, failed_count: failed }).eq('id', logId)
+  }
   console.log(`notify-driver: ${sent} sent, ${failed} failed`, errors)
 
-  return new Response(JSON.stringify({ sent, failed, errors }), { status: 200, headers: JSON_CORS })
+  return new Response(JSON.stringify({ sent, failed, errors, log_id: logId }), { status: 200, headers: JSON_CORS })
 })
