@@ -4,7 +4,7 @@ import type { PersonRole } from '../types'
 /**
  * Role-based permissions
  * parent      → admin (full access)
- * grandparent → limited (own driver assignment only)
+ * grandparent → limited (own driver assignment only), de gazdátlan fuvart vállalhat
  * babysitter  → drive-only, filtered view (only their assigned legs)
  * child       → read-only, no edit
  */
@@ -24,5 +24,16 @@ export function useRole() {
   // Babysitter: only sees legs where they are the driver/companion
   const isFilteredView = isBabysitter
 
-  return { role, isAdmin, isGrandparent, isBabysitter, isChild, canDriveOnly, canSeeSablon, isFilteredView }
+  return {
+    role, isAdmin, isGrandparent, isBabysitter, isChild,
+    canDriveOnly, canSeeSablon, isFilteredView,
+    // ── redesign terv 2. szakasz — beszédes nevek ──────────────────────────
+    canAssignOthers:   isAdmin,
+    canSelfAssign:     isAdmin || isGrandparent,
+    canReleaseOwn:     !isChild,
+    canEditOccurrence: isAdmin,
+    canEditSchedule:   isAdmin,
+    canEditHousehold:  isAdmin,
+    seesEverything:    !isBabysitter,
+  }
 }

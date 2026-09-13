@@ -80,7 +80,7 @@
   --z-toast:  70;
 
   /* Alsó nav — biztonsági zónával együtt számított magasság */
-  --nav-height: calc(56px + env(safe-area-inset-bottom, 0));
+  --nav-height: calc(72px + env(safe-area-inset-bottom, 0));
 
   /* Tartalom max szélessége (tablet / landscape mobil) */
   --content-max-width: 480px;
