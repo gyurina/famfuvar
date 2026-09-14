@@ -7,6 +7,7 @@ import { Icon } from './Icon'
 import { copy } from '../copy'
 import { formatShortDate, isoWeekday, toIsoDate, weekdayOn } from '../lib/format'
 import { budapestIso } from '../lib/occurrences'
+import { refreshHorizon } from '../lib/horizon'
 import type { Location, Person } from '../types'
 
 interface Props {
@@ -68,6 +69,8 @@ export function NewEventSheet({
           valid_to: null,
         })
         if (err) throw err
+        const genErr = await refreshHorizon(householdId)
+        if (genErr) throw new Error(genErr)
         openRides = (dropoff ? 1 : 0) + (pickup ? 1 : 0)
       } else {
         const { data: occ, error: occErr } = await supabase.from('occurrence').insert({

@@ -8,6 +8,7 @@ import { copy } from '../copy'
 import { formatShortDate, toIsoDate } from '../lib/format'
 import { Icon } from '../components/Icon'
 import { useToast } from '../components/Toast'
+import { refreshHorizon, syncTemplateRides } from '../lib/horizon'
 
 type Mode = 'single' | 'group'
 
@@ -130,6 +131,13 @@ export function Sablon({ embedded = false }: { embedded?: boolean }) {
         .from('schedule_template').update(payload).eq('id', editing.id).select().single()
       if (err) { setError(err.message); setSaving(false); return }
       setTemplates(prev => prev.map(t => t.id === editing.id ? data : t))
+      try {
+        await syncTemplateRides(data)
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : copy.common.errorOccurred)
+        setSaving(false)
+        return
+      }
     } else {
       // Create: one template per selected weekday
       const inserts = form.weekdays.map(wd => ({ ...basePayload, weekday: wd }))
@@ -137,17 +145,26 @@ export function Sablon({ embedded = false }: { embedded?: boolean }) {
         .from('schedule_template').insert(inserts).select()
       if (err) { setError(err.message); setSaving(false); return }
       setTemplates(prev => [...prev, ...(data ?? [])])
+      try {
+        for (const row of data ?? []) await syncTemplateRides(row)
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : copy.common.errorOccurred)
+        setSaving(false)
+        return
+      }
     }
 
+    const genErr = await refreshHorizon(householdId)
     setSaving(false); setShowForm(false)
-    show({ text: copy.toast.scheduleSaved })
+    show({ text: genErr ? copy.schedule.generateError(genErr) : copy.toast.scheduleSaved })
   }
 
   async function handleDelete(id: string) {
     await supabase.from('schedule_template').delete().eq('id', id)
     setTemplates(prev => prev.filter(t => t.id !== id))
     setDeleteConfirm(null); setShowForm(false)
-    show({ text: copy.toast.scheduleSaved })
+    const genErr = householdId ? await refreshHorizon(householdId) : null
+    show({ text: genErr ? copy.schedule.generateError(genErr) : copy.toast.scheduleSaved })
   }
 
   const childMap = Object.fromEntries(children.map(c => [c.id, c]))
