@@ -1,19 +1,28 @@
-import type { DriverBlock, Person } from '../types'
-import { Icon } from './Icon'
+import type { DriverBlock, Person, PersonRole } from '../types'
+import { Icon, type IconName } from './Icon'
 
 export type AvatarSize = 26 | 34 | 46 | 52
 
 export type { DriverBlock }
 
 interface AvatarProps {
-  person?: Pick<Person, 'display_name' | 'color'> | null
+  person?: Pick<Person, 'display_name' | 'color' | 'role'> | null
   size: AvatarSize
   /** Ütköző kezdőbetűkhöz: a háztartás többi neve. */
   householdNames?: string[]
   block?: DriverBlock
-  variant?: 'person' | 'self'
+  variant?: 'person' | 'self' | 'guest'
   /** Sofőr-gyűrű / kísérő-gyűrű a DriverRow-ban. */
   mark?: 'driver' | 'companion'
+}
+
+export function roleIcon(role: PersonRole | 'guest' | undefined): IconName {
+  if (role === 'parent') return 'user'
+  if (role === 'grandparent') return 'user-circle'
+  if (role === 'babysitter') return 'baby'
+  if (role === 'child') return 'smiley'
+  if (role === 'guest') return 'user-plus'
+  return 'user'
 }
 
 function monogram(name: string, householdNames: string[]): string {
@@ -34,6 +43,13 @@ function badgeBg(kind: DriverBlock['kind']) {
   return 'var(--color-danger)'
 }
 
+function glyphSize(size: AvatarSize) {
+  if (size >= 52) return 22
+  if (size >= 46) return 20
+  if (size >= 34) return 17
+  return 14
+}
+
 export function Avatar({
   person,
   size,
@@ -43,24 +59,33 @@ export function Avatar({
   mark,
 }: AvatarProps) {
   const showBadge = !!block && (size === 46 || size === 52) && mark !== 'driver' && mark !== 'companion'
+  const markClass = mark ? ` mark-${mark}` : ''
 
   if (variant === 'self') {
     return (
-      <span className={`avatar self size-${size}${mark ? ` mark-${mark}` : ''}`}>
-        <Icon name="person-simple-walk" size={size >= 46 ? 20 : 17} />
+      <span className={`avatar self size-${size}${markClass}`}>
+        <Icon name="person-simple-walk" size={glyphSize(size)} />
+      </span>
+    )
+  }
+
+  if (variant === 'guest') {
+    return (
+      <span className={`avatar guest size-${size}${markClass}`}>
+        <Icon name="user-plus" size={glyphSize(size)} weight="fill" />
       </span>
     )
   }
 
   const name = person?.display_name ?? ''
-  const markClass = mark ? ` mark-${mark}` : ''
+  const icon = person?.role ? roleIcon(person.role) : null
   return (
     <span
       className={`avatar size-${size}${markClass}`}
       style={{ background: person?.color ?? 'var(--color-muted)' }}
     >
-      {mark === 'driver'
-        ? <Icon name="steering-wheel" size={size >= 52 ? 21 : size >= 46 ? 19 : 15} weight="fill" color="#fff" />
+      {icon
+        ? <Icon name={icon} size={glyphSize(size)} weight="fill" color="#fff" />
         : monogram(name, householdNames)}
       {showBadge && block && (
         <span className="avatar-badge" style={{ background: badgeBg(block.kind) }}>

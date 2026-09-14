@@ -27,6 +27,8 @@ import {
   blocksForRide,
   companionIdsOf,
   findMergeHint,
+  guestNameOf,
+  isRideOpen,
   nextCompanions,
   rideDurationMins,
   rideState,
@@ -76,11 +78,12 @@ export function Rides() {
 
   const { assign, assignMany, release, claim } = useAssignDriver(applyPatch)
 
-  function toastRide(leg: LegRow, nextDriverId: string | null, self = false) {
+  function toastRide(leg: LegRow, nextDriverId: string | null, self = false, guest: string | null = null) {
     const prev = {
       driver_id: leg.driver_id,
       companions: companionIdsOf(leg).filter(id => id !== leg.driver_id),
       self: leg.self_transport,
+      guest: guestNameOf(leg),
     }
     show({
       text: rideWriteToast({
@@ -88,8 +91,9 @@ export function Rides() {
         child: personById(leg.occurrence?.person_id ?? null),
         direction: leg.direction,
         self,
+        guest,
       }),
-      undo: () => assign(leg.id, prev.driver_id, prev.companions, prev.self),
+      undo: () => assign(leg.id, prev.driver_id, prev.companions, prev.self, prev.guest),
     })
   }
 
@@ -190,7 +194,7 @@ export function Rides() {
   const visLegs = hideCancelled
     ? legs.filter(l => l.occurrence?.status !== 'cancelled')
     : legs
-  const orphans = visLegs.filter(l => !l.driver_id && !l.self_transport && l.occurrence?.status !== 'cancelled')
+  const orphans = visLegs.filter(l => isRideOpen(l))
   const mineCount = visLegs.filter(l =>
     myId && (l.driver_id === myId || l.companion_id === myId || l.companion2_id === myId),
   ).length
@@ -212,7 +216,7 @@ export function Rides() {
   const grouped = days.map(d => {
     let dayLegs = visLegs.filter(l => l.depart_at.startsWith(toIsoDate(d)))
     if (filter === 'open') {
-      dayLegs = dayLegs.filter(l => !l.driver_id && !l.self_transport)
+      dayLegs = dayLegs.filter(l => isRideOpen(l))
     } else if (filter === 'mine' && myId) {
       dayLegs = dayLegs.filter(l =>
         l.driver_id === myId || l.companion_id === myId || l.companion2_id === myId,
@@ -310,6 +314,7 @@ export function Rides() {
             assign(leg.id, leg.driver_id, nextCompanions(companionIdsOf(leg).filter(c => c !== leg.driver_id), id))
           }}
           onSelf={() => { assign(leg.id, null, [], true); toastRide(leg, null, true) }}
+          onGuest={name => { assign(leg.id, null, [], false, name); toastRide(leg, null, false, name) }}
           onRelease={() => { release(leg.id); toastRide(leg, null) }}
           onClaim={myId ? () => { claim(leg.id, myId); toastRide(leg, myId) } : undefined}
           onMerge={rideId => mergeIds([leg.id, rideId])}
@@ -322,7 +327,7 @@ export function Rides() {
   function renderTripCard(tripId: string, tripLegs: LegRow[]) {
     const sorted = [...tripLegs].sort((a, b) => a.depart_at.localeCompare(b.depart_at))
     const rep = sorted[0]
-    const state = sorted.every(l => l.driver_id) ? 'assigned' as const : 'open' as const
+    const state = sorted.every(l => l.driver_id || guestNameOf(l)) ? 'assigned' as const : 'open' as const
     const first = sorted[0]
     const last = sorted[sorted.length - 1]
     const duration = first && last
@@ -358,6 +363,7 @@ export function Rides() {
           state={state}
           driverId={rep?.driver_id ?? null}
           companionIds={rep ? companionIdsOf(rep) : []}
+          guestName={rep ? guestNameOf(rep) : null}
           blocks={rep ? blocksForRide(rep, legs, drivers, extEvents, interval) : {}}
           drivers={drivers}
           canAssign={canAssignOthers}
@@ -372,6 +378,7 @@ export function Rides() {
               driver_id: l.driver_id,
               companions: companionIdsOf(l).filter(id => id !== l.driver_id),
               self: l.self_transport,
+              guest: guestNameOf(l),
             }))
             assignMany(sorted.map(l => l.id), driverId, rep ? companionIdsOf(rep).filter(id => id !== driverId) : [])
             show({
@@ -381,12 +388,32 @@ export function Rides() {
                 direction: rep?.direction ?? 'pickup',
                 self: false,
               }),
-              undo: () => { snapshot.forEach(s => assign(s.id, s.driver_id, s.companions, s.self)) },
+              undo: () => { snapshot.forEach(s => assign(s.id, s.driver_id, s.companions, s.self, s.guest)) },
             })
           }}
           onCompanion={id => {
             if (!rep?.driver_id) { assignMany(sorted.map(l => l.id), id); return }
             assignMany(sorted.map(l => l.id), rep.driver_id, nextCompanions(companionIdsOf(rep).filter(c => c !== rep.driver_id), id))
+          }}
+          onGuest={name => {
+            const snapshot = sorted.map(l => ({
+              id: l.id,
+              driver_id: l.driver_id,
+              companions: companionIdsOf(l).filter(id => id !== l.driver_id),
+              self: l.self_transport,
+              guest: guestNameOf(l),
+            }))
+            assignMany(sorted.map(l => l.id), null, [], false, name)
+            show({
+              text: rideWriteToast({
+                driver: null,
+                child: personById(rep?.occurrence?.person_id ?? null),
+                direction: rep?.direction ?? 'pickup',
+                self: false,
+                guest: name,
+              }),
+              undo: () => { snapshot.forEach(s => assign(s.id, s.driver_id, s.companions, s.self, s.guest)) },
+            })
           }}
           onRelease={() => {
             const snapshot = sorted.map(l => ({
@@ -394,6 +421,7 @@ export function Rides() {
               driver_id: l.driver_id,
               companions: companionIdsOf(l).filter(id => id !== l.driver_id),
               self: l.self_transport,
+              guest: guestNameOf(l),
             }))
             assignMany(sorted.map(l => l.id), null, [])
             show({
@@ -403,7 +431,7 @@ export function Rides() {
                 direction: rep?.direction ?? 'pickup',
                 self: false,
               }),
-              undo: () => { snapshot.forEach(s => assign(s.id, s.driver_id, s.companions, s.self)) },
+              undo: () => { snapshot.forEach(s => assign(s.id, s.driver_id, s.companions, s.self, s.guest)) },
             })
           }}
           onClaim={myId ? () => {
@@ -412,6 +440,7 @@ export function Rides() {
               driver_id: l.driver_id,
               companions: companionIdsOf(l).filter(id => id !== l.driver_id),
               self: l.self_transport,
+              guest: guestNameOf(l),
             }))
             assignMany(sorted.map(l => l.id), myId)
             show({
@@ -421,7 +450,7 @@ export function Rides() {
                 direction: rep?.direction ?? 'pickup',
                 self: false,
               }),
-              undo: () => { snapshot.forEach(s => assign(s.id, s.driver_id, s.companions, s.self)) },
+              undo: () => { snapshot.forEach(s => assign(s.id, s.driver_id, s.companions, s.self, s.guest)) },
             })
           } : undefined}
           onSplit={() => handleSplit(tripId, sorted)}

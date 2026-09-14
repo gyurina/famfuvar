@@ -20,6 +20,7 @@ export interface GroupedRideCardProps {
   state: 'assigned' | 'open'
   driverId: string | null
   companionIds: string[]
+  guestName?: string | null
   blocks: Record<string, DriverBlock>
   drivers: Person[]
   canAssign: boolean
@@ -30,6 +31,7 @@ export interface GroupedRideCardProps {
   viewerId?: string | null
   onAssign: (driverId: string) => void
   onCompanion: (id: string) => void
+  onGuest?: (name: string) => void
   onRelease: () => void
   onClaim?: () => void
   onSplit: () => void
@@ -41,6 +43,7 @@ export function GroupedRideCard({
   state,
   driverId,
   companionIds,
+  guestName = null,
   blocks,
   drivers,
   canAssign,
@@ -51,6 +54,7 @@ export function GroupedRideCard({
   viewerId = null,
   onAssign,
   onCompanion,
+  onGuest,
   onRelease,
   onClaim,
   onSplit,
@@ -72,10 +76,11 @@ export function GroupedRideCard({
   const isOwn = !!viewerId && (driverId === viewerId || companionIds.includes(viewerId))
   const showCantTake = !canAssign && canRelease && isOwn
   const who = childList(stops.map(s => accusative(s.child)))
-  const assignedTitle = driver
+  const assignedDriverName = driver?.display_name ?? guestName
+  const assignedTitle = assignedDriverName
     ? (stops.every(s => s.direction === 'inbound')
-      ? copy.sentence.groupAssignedInbound(driver.display_name, who)
-      : copy.sentence.groupAssignedOutbound(driver.display_name, who))
+      ? copy.sentence.groupAssignedInbound(assignedDriverName, who)
+      : copy.sentence.groupAssignedOutbound(assignedDriverName, who))
     : title
 
   const modifier = state === 'open' && (canAssign || canClaim)
@@ -93,6 +98,14 @@ export function GroupedRideCard({
       return
     }
     onAssign(id)
+  }
+
+  function handleGuest(name: string) {
+    if (!name.trim()) {
+      onRelease()
+      return
+    }
+    onGuest?.(name.trim())
   }
 
   return (
@@ -141,11 +154,14 @@ export function GroupedRideCard({
               driverId={driverId}
               companionIds={companionIds}
               selfTransport={false}
+              guestName={guestName}
               blocks={blocks}
               mode="claim"
+              allowSelf={false}
               onPickDriver={handlePickDriver}
               onPickCompanion={onCompanion}
               onPickSelf={() => {}}
+              onPickGuest={onGuest ? handleGuest : undefined}
               onClaim={onClaim}
             />
           </>
@@ -159,12 +175,15 @@ export function GroupedRideCard({
               driverId={driverId}
               companionIds={companionIds}
               selfTransport={false}
+              guestName={guestName}
               blocks={blocks}
               mode="assign"
               householdNames={householdNames}
+              allowSelf={false}
               onPickDriver={handlePickDriver}
               onPickCompanion={onCompanion}
               onPickSelf={() => {}}
+              onPickGuest={onGuest ? handleGuest : undefined}
             />
             <button type="button" className="grouped-split" onClick={onSplit}>
               <Icon name="arrows-split" size={15} />
@@ -174,11 +193,13 @@ export function GroupedRideCard({
           </>
         )}
 
-        {state === 'assigned' && driver && (
+        {state === 'assigned' && (driver || guestName) && (
           <>
             <div className="ride-card-assigned">
               <div className="grouped-avatars">
-                <Avatar person={driver} size={34} householdNames={householdNames} />
+                {driver
+                  ? <Avatar person={driver} size={34} householdNames={householdNames} />
+                  : <Avatar variant="guest" size={34} />}
                 {companion && (
                   <Avatar person={companion} size={34} householdNames={householdNames} />
                 )}

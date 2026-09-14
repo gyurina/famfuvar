@@ -160,7 +160,13 @@ export function More() {
             !pushOn,
           )}
           {isAdmin && row(
-            '/egyeb/ertesitesek',
+            '/egyeb/uzenet',
+            'paper-plane',
+            copy.more.message,
+            copy.more.messageSub,
+          )}
+          {isAdmin && row(
+            '/egyeb/naptarak',
             'google-logo',
             copy.more.google,
             copy.more.googleSub(googleCount),

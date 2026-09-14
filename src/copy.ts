@@ -65,6 +65,7 @@ export const copy = {
     grandparent: 'Nagyszülő',
     child: 'Gyerek',
     babysitter: 'Felügyelet',
+    guest: 'Egyedi',
   },
 
   form: {
@@ -109,6 +110,7 @@ export const copy = {
     drivers: 'Sofőrök',
     driverTakes: (name: string) => `${name} viszi`,
     selfGoes: 'Önállóan megy',
+    guestDriver: 'Egyedi sofőr',
     openRides: (n: number) =>
       n === 1 ? 'Egy nyitott fuvar' : `${n} nyitott fuvar`,
   },
@@ -176,6 +178,11 @@ export const copy = {
     driving: 'Vezet',
     with: 'Vele',
     selfTransport: 'Önállóan',
+    guest: 'Egyedi',
+    guestTitle: 'Egyedi sofőr',
+    guestHint: 'Olyan személy, aki nincs a családban. Csak erre a fuvarra rögzül, nem kerül a törzsbe.',
+    guestPlaceholder: 'Név',
+    guestSave: 'Rögzítem',
     leaveOpen: 'Nincs sofőr',
     conflict: 'ütközés',
     calendar: 'Naptár',
@@ -517,6 +524,7 @@ export const copy = {
     scheduleSaved: 'Az órarend mentve — a következő 30 nap programjai frissülnek',
     released: (childAcc: string) => `${childAcc} fuvarja újra nyitott`,
     self: (childAcc: string) => `${childAcc} önállóan megy`,
+    guest: (driver: string, childAcc: string) => `${driver} viszi ${childAcc}`,
   },
 
   sheet: {
@@ -601,6 +609,8 @@ export const copy = {
     notifications: 'Értesítések',
     notificationsOn: 'Bekapcsolva ezen az eszközön',
     notificationsOff: 'Kikapcsolva',
+    message: 'Üzenetküldés',
+    messageSub: 'Csak a szülők küldhetnek a családnak',
     google: 'Google Naptár',
     googleSub: (n: number) =>
       n === 0 ? 'Nincs csatlakoztatva' : n === 1 ? '1 naptár összekötve' : `${n} naptár összekötve`,

@@ -544,6 +544,11 @@ a { color: inherit; text-decoration: none; }
   border: 1px dashed #3a5670;
   color: var(--color-text-2);
 }
+.avatar.guest {
+  background: #3a2a14;
+  border: 1px dashed #8a6a30;
+  color: #f5c16c;
+}
 .avatar-badge {
   position: absolute;
   right: -1px;
@@ -667,6 +672,46 @@ a { color: inherit; text-decoration: none; }
   align-items: center;
   justify-content: center;
   gap: 9px;
+}
+.driver-row-self-strip {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 10px;
+  padding: 6px 12px;
+  border-radius: 12px;
+  border: 1px dashed #3a5670;
+  background: transparent;
+  color: var(--color-text-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.driver-row-self-strip.is-on {
+  border-style: solid;
+  border-color: var(--color-accent-ink);
+  color: var(--color-accent-ink);
+  background: color-mix(in srgb, var(--color-accent-ink) 14%, transparent);
+}
+.driver-guest-label {
+  display: block;
+  font-size: 12px;
+  color: var(--color-muted);
+  margin-bottom: 6px;
+}
+.driver-guest-input {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 16px;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  outline: none;
 }
 
 /* ── RideCard / GroupedRideCard (C2, C3) ─────────── */

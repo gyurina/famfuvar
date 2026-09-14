@@ -22,6 +22,7 @@ import { copy } from '../copy'
 import { formatWeekRange, formatDayTitle, toIsoDate, directionWord } from '../lib/format'
 import { rideWriteToast } from '../lib/assignmentToast'
 import { sortLegs } from '../lib/occurrences'
+import { guestNameOf, isRideCovered } from '../lib/rideUi'
 import type { Occurrence, TransportLeg, ScheduleTemplate } from '../types'
 
 type OccWithLegs = Occurrence & { legs: TransportLeg[] }
@@ -112,7 +113,7 @@ export function Week() {
     const active = dayItems.filter(o => o.status !== 'cancelled')
     let load: DayLoad = 'empty'
     if (active.length > 0) {
-      const open = active.some(o => o.legs.some(l => !l.driver_id && !l.self_transport))
+      const open = active.some(o => o.legs.some(l => !isRideCovered(l)))
       load = open ? 'open' : 'full'
     }
     return { date: d, dateStr, isToday: isToday(d), wd, items: dayItems, load }
@@ -253,8 +254,9 @@ export function Week() {
                               <span className="week-ride-name">{copy.week.bothWaysSelf}</span>
                             </div>
                           ) : sortLegs(occ.legs).map(leg => {
-                            const open = !leg.driver_id && !leg.self_transport
+                            const open = !isRideCovered(leg)
                             const driver = personById(leg.driver_id)
+                            const guest = guestNameOf(leg)
                             const together = togetherLabel(leg, occ)
                             const mine = myId && (leg.driver_id === myId || leg.companion_id === myId || leg.companion2_id === myId)
                             return (
@@ -299,6 +301,11 @@ export function Week() {
                                   <>
                                     <Avatar variant="self" size={26} />
                                     <span className="week-ride-name">{copy.status.selfGoes}</span>
+                                  </>
+                                ) : guest ? (
+                                  <>
+                                    <Avatar variant="guest" size={26} />
+                                    <span className="week-ride-name">{guest}</span>
                                   </>
                                 ) : (
                                   <>

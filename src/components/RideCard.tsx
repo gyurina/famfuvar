@@ -9,6 +9,7 @@ import {
   assignedSentence,
   companionIdsOf,
   driverMode,
+  guestNameOf,
   rideDurationMins,
   rideSubtitle,
   type EventSummary,
@@ -36,6 +37,7 @@ export interface RideCardProps {
   onAssign: (driverId: string) => void
   onCompanion: (id: string) => void
   onSelf: () => void
+  onGuest?: (name: string) => void
   onRelease: () => void
   onClaim?: () => void
   onMerge: (rideId: string) => void
@@ -62,6 +64,7 @@ export function RideCard({
   onAssign,
   onCompanion,
   onSelf,
+  onGuest,
   onRelease,
   onClaim,
   onMerge,
@@ -69,6 +72,7 @@ export function RideCard({
 }: RideCardProps) {
   const [editing, setEditing] = useState(false)
   const driver = drivers.find(d => d.id === ride.driver_id) ?? null
+  const guestName = guestNameOf(ride)
   const companions = companionIdsOf(ride)
   const duration = rideDurationMins(ride)
   const subtitle = rideSubtitle(ride.direction, fromHome, fromName ?? null, duration)
@@ -94,12 +98,22 @@ export function RideCard({
     : 'default'
 
   function handlePickDriver(id: string) {
-    if (ride.driver_id === id && !ride.self_transport) {
+    if (ride.driver_id === id && !ride.self_transport && !guestName) {
       onRelease()
       setEditing(false)
       return
     }
     onAssign(id)
+    setEditing(false)
+  }
+
+  function handleGuest(name: string) {
+    if (!name.trim()) {
+      onRelease()
+      setEditing(false)
+      return
+    }
+    onGuest?.(name.trim())
     setEditing(false)
   }
 
@@ -154,11 +168,13 @@ export function RideCard({
                 driverId={ride.driver_id}
                 companionIds={companions}
                 selfTransport={ride.self_transport}
+                guestName={guestName}
                 blocks={blocks}
                 mode="claim"
                 onPickDriver={handlePickDriver}
                 onPickCompanion={onCompanion}
                 onPickSelf={onSelf}
+                onPickGuest={onGuest ? handleGuest : undefined}
                 onClaim={onClaim}
               />
             </>
@@ -172,21 +188,27 @@ export function RideCard({
                 driverId={ride.driver_id}
                 companionIds={companions}
                 selfTransport={ride.self_transport}
+                guestName={guestName}
                 blocks={blocks}
                 mode="assign"
                 householdNames={householdNames}
                 onPickDriver={handlePickDriver}
                 onPickCompanion={onCompanion}
-                onPickSelf={onSelf}
+                onPickSelf={() => { onSelf(); setEditing(false) }}
+                onPickGuest={onGuest ? handleGuest : undefined}
               />
             </>
           )}
 
-          {!showRow && !showClaim && state === 'assigned' && driver && (
+          {!showRow && !showClaim && state === 'assigned' && (driver || guestName) && (
             <div className="ride-card-assigned">
-              <Avatar person={driver} size={34} householdNames={householdNames} />
+              {driver
+                ? <Avatar person={driver} size={34} householdNames={householdNames} />
+                : <Avatar variant="guest" size={34} />}
               <div className="ride-card-assigned-text">
-                <div className="ride-card-assigned-title">{assignedSentence(driver.display_name, ride.direction)}</div>
+                <div className="ride-card-assigned-title">
+                  {assignedSentence(driver?.display_name ?? guestName ?? '', ride.direction)}
+                </div>
                 {pairedSameDriver && pairedRide && (
                   <div className="ride-card-assigned-sub">{copy.rides.alsoCollects(formatTime(pairedRide.depart_at))}</div>
                 )}

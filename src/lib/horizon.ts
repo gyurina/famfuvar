@@ -1,7 +1,13 @@
 import { supabase } from './supabase'
 import { budapestIso } from './occurrences'
-import { toIsoDate } from './format'
+import { isoWeekday, toIsoDate } from './format'
 import type { ScheduleTemplate } from '../types'
+
+function addCalendarDays(iso: string, n: number): string {
+  const [y, m, d] = iso.split('-').map(Number)
+  const dt = new Date(Date.UTC(y, m - 1, d + n))
+  return dt.toISOString().slice(0, 10)
+}
 
 /** Az órarendből létrehozza / szinkronizálja a következő 30 nap programjait és fuvarjait. */
 export async function refreshHorizon(householdId: string): Promise<string | null> {
@@ -9,7 +15,99 @@ export async function refreshHorizon(householdId: string): Promise<string | null
     p_household_id: householdId,
     p_days_ahead: 30,
   })
-  return error?.message ?? null
+  if (!error) return null
+  console.warn('generate_horizon', error.message)
+  try {
+    await generateHorizonClient(householdId, 30)
+    return null
+  } catch (e) {
+    return e instanceof Error ? e.message : error.message
+  }
+}
+
+/**
+ * RPC nélkül is kitölti a hiányzó alkalmakat — akkor fut, ha a szerver
+ * ON CONFLICT hibára fut (a unique index még a régi).
+ */
+async function generateHorizonClient(householdId: string, daysAhead: number): Promise<void> {
+  const today = toIsoDate(new Date())
+  const end = addCalendarDays(today, daysAhead)
+
+  const { data: templates, error: tplErr } = await supabase
+    .from('schedule_template')
+    .select('*')
+    .eq('household_id', householdId)
+  if (tplErr) throw tplErr
+  if (!templates?.length) return
+
+  const { data: members } = await supabase
+    .from('travel_group_member')
+    .select('group_id, person_id')
+  const byGroup = new Map<string, string[]>()
+  for (const m of members ?? []) {
+    if (!m.person_id) continue
+    const arr = byGroup.get(m.group_id) ?? []
+    arr.push(m.person_id)
+    byGroup.set(m.group_id, arr)
+  }
+
+  const { data: existing, error: occErr } = await supabase
+    .from('occurrence')
+    .select('id, template_id, person_id, on_date')
+    .eq('household_id', householdId)
+    .gte('on_date', today)
+    .lte('on_date', end)
+    .not('template_id', 'is', null)
+  if (occErr) throw occErr
+
+  const havePerson = new Set(
+    (existing ?? []).map(o => `${o.template_id}|${o.person_id}|${o.on_date}`),
+  )
+
+  const toInsert: Record<string, unknown>[] = []
+  for (let i = 0; i <= daysAhead; i++) {
+    const onDate = addCalendarDays(today, i)
+    const weekday = isoWeekday(onDate)
+    for (const t of templates as ScheduleTemplate[]) {
+      if (t.weekday !== weekday) continue
+      if (t.valid_from > onDate) continue
+      if (t.valid_to && t.valid_to < onDate) continue
+      const pids = t.group_id
+        ? (byGroup.get(t.group_id) ?? [])
+        : (t.person_id ? [t.person_id] : [])
+      for (const pid of pids) {
+        const personKey = `${t.id}|${pid}|${onDate}`
+        if (havePerson.has(personKey)) continue
+        toInsert.push({
+          household_id: householdId,
+          template_id: t.id,
+          person_id: pid,
+          title: t.title,
+          on_date: onDate,
+          starts_at: t.starts_at,
+          ends_at: t.ends_at,
+          location_id: t.location_id,
+          status: 'planned',
+        })
+        havePerson.add(personKey)
+      }
+    }
+  }
+
+  const chunk = 40
+  for (let i = 0; i < toInsert.length; i += chunk) {
+    const slice = toInsert.slice(i, i + chunk)
+    const { error } = await supabase.from('occurrence').insert(slice)
+    if (!error) continue
+    for (const row of slice) {
+      const { error: oneErr } = await supabase.from('occurrence').insert(row)
+      if (oneErr && oneErr.code !== '23505') throw oneErr
+    }
+  }
+
+  for (const t of templates as ScheduleTemplate[]) {
+    await syncTemplateRides(t)
+  }
 }
 
 /**

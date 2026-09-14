@@ -68,6 +68,8 @@ function AppShell() {
         <Route path="/egyeb/csalad" element={<RequireFamilyLife><Family /></RequireFamilyLife>} />
         <Route path="/egyeb/helyszinek" element={<RequireFamilyLife><Beallitasok section="helyszinek" /></RequireFamilyLife>} />
         <Route path="/egyeb/ertesitesek" element={<RequireMore><Beallitasok section="ertesitesek" /></RequireMore>} />
+        <Route path="/egyeb/uzenet" element={<RequireAdmin><Beallitasok section="uzenet" /></RequireAdmin>} />
+        <Route path="/egyeb/naptarak" element={<RequireAdmin><Beallitasok section="naptarak" /></RequireAdmin>} />
         <Route path="/fuvar" element={<Navigate to="/fuvarok" replace />} />
         <Route path="/esemeny" element={<Navigate to="/het" replace />} />
         <Route path="/sablon" element={<Navigate to="/egyeb/orarend" replace />} />

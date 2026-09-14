@@ -4,6 +4,7 @@ import { db } from '../lib/db'
 import { useHousehold } from './useHousehold'
 import { useOnlineStatus } from './useOnlineStatus'
 import type { Occurrence, TransportLeg } from '../types'
+import { isRideOpen } from '../lib/rideUi'
 
 export type OpenRide = TransportLeg & { occurrence: Occurrence }
 
@@ -67,9 +68,7 @@ export function useOpenRides(from: string, to: string) {
   }, [householdId])
 
   const openLegs = useMemo(
-    () => legs.filter(l =>
-      !l.driver_id && !l.self_transport && l.occurrence?.status !== 'cancelled',
-    ),
+    () => legs.filter(l => isRideOpen(l)),
     [legs],
   )
 

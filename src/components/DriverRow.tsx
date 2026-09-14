@@ -1,6 +1,7 @@
 import { useRef, useState, type KeyboardEvent } from 'react'
 import { Avatar, type DriverBlock } from './Avatar'
 import { Icon } from './Icon'
+import { Sheet } from './Sheet'
 import { copy } from '../copy'
 import type { Person } from '../types'
 
@@ -12,35 +13,44 @@ export interface DriverRowProps {
   driverId: string | null
   companionIds: string[]
   selfTransport: boolean
+  guestName?: string | null
   /** Akadályok sofőrönként. Kulcs: person.id */
   blocks: Record<string, DriverBlock>
   mode: 'assign' | 'claim' | 'read'
   size?: 46 | 52
   householdNames?: string[]
+  allowSelf?: boolean
   onPickDriver: (id: string) => void
   onPickCompanion: (id: string) => void
   onPickSelf: () => void
+  onPickGuest?: (name: string) => void
   onClaim?: () => void
 }
 
-const SELF_ID = '__self__'
+const GUEST_ID = '__guest__'
 
 export function DriverRow({
   drivers,
   driverId,
   companionIds,
   selfTransport,
+  guestName = null,
   blocks,
   mode,
   size = 46,
   householdNames = [],
+  allowSelf = true,
   onPickDriver,
   onPickCompanion,
   onPickSelf,
+  onPickGuest,
   onClaim,
 }: DriverRowProps) {
   const [pendingBlockId, setPendingBlockId] = useState<string | null>(null)
+  const [guestOpen, setGuestOpen] = useState(false)
+  const [guestDraft, setGuestDraft] = useState(guestName ?? '')
   const itemRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+  const guestOn = !!guestName && !driverId && !selfTransport
 
   if (mode === 'claim') {
     return (
@@ -52,7 +62,6 @@ export function DriverRow({
   }
 
   if (mode === 'read') {
-    const driver = drivers.find(d => d.id === driverId) ?? null
     if (selfTransport) {
       return (
         <div className="driver-row driver-row--read">
@@ -61,6 +70,15 @@ export function DriverRow({
         </div>
       )
     }
+    if (guestOn && guestName) {
+      return (
+        <div className="driver-row driver-row--read">
+          <Avatar variant="guest" size={34} />
+          <span className="driver-row-read-name">{guestName}</span>
+        </div>
+      )
+    }
+    const driver = drivers.find(d => d.id === driverId) ?? null
     if (!driver) return null
     return (
       <div className="driver-row driver-row--read">
@@ -70,9 +88,12 @@ export function DriverRow({
     )
   }
 
-  const slots = drivers.length + 1
+  const ids = [
+    ...drivers.map(d => d.id),
+    ...(onPickGuest ? [GUEST_ID] : []),
+  ]
+  const slots = ids.length
   const scroll = slots > 5
-  const ids = [...drivers.map(d => d.id), SELF_ID]
 
   function focusId(id: string) {
     itemRefs.current[id]?.focus()
@@ -98,7 +119,7 @@ export function DriverRow({
       return
     }
     setPendingBlockId(null)
-    if (selfTransport) {
+    if (selfTransport || guestOn) {
       onPickDriver(d.id)
       return
     }
@@ -113,6 +134,23 @@ export function DriverRow({
     onPickCompanion(d.id)
   }
 
+  function openGuest() {
+    setPendingBlockId(null)
+    if (guestOn) {
+      onPickGuest?.('')
+      return
+    }
+    setGuestDraft(guestName ?? '')
+    setGuestOpen(true)
+  }
+
+  function saveGuest() {
+    const name = guestDraft.trim()
+    if (!name || !onPickGuest) return
+    onPickGuest(name)
+    setGuestOpen(false)
+  }
+
   return (
     <div className={`driver-row-wrap${scroll ? ' is-scroll' : ''}`}>
       <div
@@ -123,7 +161,7 @@ export function DriverRow({
       >
         {drivers.map(d => {
           const block = blocks[d.id]
-          const isDriver = driverId === d.id && !selfTransport
+          const isDriver = driverId === d.id && !selfTransport && !guestOn
           const isCompanion = companionIds.includes(d.id)
           const isBlocked = !!block && !isDriver && !isCompanion
           const pending = pendingBlockId === d.id
@@ -165,20 +203,59 @@ export function DriverRow({
             </button>
           )
         })}
-        <button
-          ref={el => { itemRefs.current[SELF_ID] = el }}
-          type="button"
-          role="radio"
-          aria-checked={selfTransport}
-          aria-label={copy.a11y.selfGoes}
-          className={`driver-row-item${selfTransport ? ' is-driver' : ''}`}
-          onClick={() => { setPendingBlockId(null); onPickSelf() }}
-        >
-          <Avatar variant="self" size={size} mark={selfTransport ? 'driver' : undefined} />
-          <span className="driver-row-label">{copy.rides.selfTransport}</span>
-        </button>
+        {onPickGuest && (
+          <button
+            ref={el => { itemRefs.current[GUEST_ID] = el }}
+            type="button"
+            role="radio"
+            aria-checked={guestOn}
+            aria-label={copy.a11y.guestDriver}
+            className={`driver-row-item${guestOn ? ' is-driver' : ''}`}
+            onClick={openGuest}
+          >
+            <Avatar variant="guest" size={size} mark={guestOn ? 'driver' : undefined} />
+            <span className="driver-row-label">{guestOn && guestName ? guestName : copy.rides.guest}</span>
+          </button>
+        )}
       </div>
       {scroll && <div className="driver-row-fade" aria-hidden="true" />}
+      {allowSelf && (
+        <button
+          type="button"
+          className={`driver-row-self-strip${selfTransport ? ' is-on' : ''}`}
+          aria-pressed={selfTransport}
+          aria-label={copy.a11y.selfGoes}
+          onClick={() => { setPendingBlockId(null); onPickSelf() }}
+        >
+          <Avatar variant="self" size={34} mark={selfTransport ? 'driver' : undefined} />
+          <span>{copy.rides.selfTransport}</span>
+        </button>
+      )}
+      {guestOpen && (
+        <Sheet
+          title={copy.rides.guestTitle}
+          subtitle={copy.rides.guestHint}
+          onClose={() => setGuestOpen(false)}
+          padded
+          primary={{
+            label: copy.rides.guestSave,
+            disabled: !guestDraft.trim(),
+            onClick: saveGuest,
+          }}
+          secondary={{ label: copy.common.cancel, onClick: () => setGuestOpen(false) }}
+        >
+          <label className="driver-guest-label" htmlFor="guest-driver-name">{copy.rides.guestPlaceholder}</label>
+          <input
+            id="guest-driver-name"
+            className="driver-guest-input"
+            value={guestDraft}
+            autoFocus
+            onChange={e => setGuestDraft(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') saveGuest() }}
+            placeholder={copy.rides.guestPlaceholder}
+          />
+        </Sheet>
+      )}
     </div>
   )
 }

@@ -4,6 +4,7 @@
 
 import { db } from './db'
 import { supabase } from './supabase'
+import { GUEST_NOTE_PREFIX } from './rideUi'
 
 export type AssignDriverPayload = {
   leg_id:        string
@@ -11,6 +12,7 @@ export type AssignDriverPayload = {
   companion_id:  string | null
   companion2_id: string | null
   self_transport: boolean
+  guest_name?:   string | null
 }
 
 /** Offline módban sorba helyez egy sofőr-hozzárendelést. */
@@ -32,14 +34,28 @@ export async function flushSyncQueue(): Promise<void> {
     try {
       if (item.action === 'ASSIGN_DRIVER') {
         const p = item.payload as unknown as AssignDriverPayload
-        const { error } = await supabase.from('transport_leg')
-          .update({
-            driver_id:     p.driver_id,
-            companion_id:  p.companion_id,
-            companion2_id: p.companion2_id,
-            self_transport: p.self_transport,
-          })
+        const core = {
+          driver_id:     p.driver_id,
+          companion_id:  p.companion_id,
+          companion2_id: p.companion2_id,
+          self_transport: p.self_transport,
+          guest_name:    p.guest_name ?? null,
+        }
+        let { error } = await supabase.from('transport_leg')
+          .update(core)
           .eq('id', p.leg_id)
+        if (error && /guest_name/i.test(error.message)) {
+          const retry = await supabase.from('transport_leg')
+            .update({
+              driver_id:     p.driver_id,
+              companion_id:  p.companion_id,
+              companion2_id: p.companion2_id,
+              self_transport: p.self_transport,
+              note: p.guest_name ? `${GUEST_NOTE_PREFIX}${p.guest_name}` : null,
+            })
+            .eq('id', p.leg_id)
+          error = retry.error
+        }
         if (error) throw error
       }
       await db.sync_queue.delete(item.id!)

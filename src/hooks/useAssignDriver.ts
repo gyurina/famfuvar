@@ -4,6 +4,7 @@ import { db } from '../lib/db'
 import { queueAssignDriver } from '../lib/sync'
 import { useOnlineStatus } from './useOnlineStatus'
 import { useAuth } from '../lib/auth'
+import { GUEST_NOTE_PREFIX } from '../lib/rideUi'
 import type { TransportLeg } from '../types'
 
 export type AssignmentPatch = {
@@ -12,6 +13,12 @@ export type AssignmentPatch = {
   companion_id: string | null
   companion2_id: string | null
   self_transport: boolean
+  guest_name: string | null
+  note?: string | null
+}
+
+function isMissingGuestColumn(message: string | undefined) {
+  return !!message && /guest_name/i.test(message)
 }
 
 export function useAssignDriver(onUpdated?: (patch: AssignmentPatch) => void) {
@@ -25,6 +32,7 @@ export function useAssignDriver(onUpdated?: (patch: AssignmentPatch) => void) {
     companionId: string | null,
     companion2Id: string | null,
     selfTransport: boolean,
+    guestName: string | null,
     notify: boolean,
   ) {
     const patch: AssignmentPatch = {
@@ -33,43 +41,73 @@ export function useAssignDriver(onUpdated?: (patch: AssignmentPatch) => void) {
       companion_id: companionId,
       companion2_id: companion2Id,
       self_transport: selfTransport,
+      guest_name: guestName,
     }
     onUpdated?.(patch)
+    let prevNote: string | null = null
     try {
       const cached = await db.transport_legs.get(legId)
-      if (cached) await db.transport_legs.put({ ...cached, ...patch })
+      if (cached) {
+        prevNote = cached.note
+        await db.transport_legs.put({ ...cached, ...patch })
+      }
     } catch { /* cache optional */ }
 
+    const payload = {
+      leg_id: legId,
+      driver_id: driverId,
+      companion_id: companionId,
+      companion2_id: companion2Id,
+      self_transport: selfTransport,
+      guest_name: guestName,
+    }
+
     if (!online) {
-      await queueAssignDriver({
-        leg_id: legId,
-        driver_id: driverId,
-        companion_id: companionId,
-        companion2_id: companion2Id,
-        self_transport: selfTransport,
-      })
+      await queueAssignDriver(payload)
       return
     }
 
-    const { data, error } = await supabase.from('transport_leg')
-      .update({
-        driver_id: driverId,
-        companion_id: companionId,
-        companion2_id: companion2Id,
-        self_transport: selfTransport,
-      })
+    const core = {
+      driver_id: driverId,
+      companion_id: companionId,
+      companion2_id: companion2Id,
+      self_transport: selfTransport,
+      guest_name: guestName,
+    }
+
+    let { data, error } = await supabase.from('transport_leg')
+      .update(core)
       .eq('id', legId)
       .select('*, occurrence(*)')
       .maybeSingle()
 
-    if (error) {
-      await queueAssignDriver({
-        leg_id: legId,
+    if (error && isMissingGuestColumn(error.message)) {
+      const nextNote = guestName
+        ? `${GUEST_NOTE_PREFIX}${guestName}`
+        : (prevNote?.toLowerCase().startsWith(GUEST_NOTE_PREFIX) ? null : prevNote)
+      const fallback = {
         driver_id: driverId,
         companion_id: companionId,
         companion2_id: companion2Id,
         self_transport: selfTransport,
-      })
+        note: nextNote,
+      }
+      const retry = await supabase.from('transport_leg')
+        .update(fallback)
+        .eq('id', legId)
+        .select('*, occurrence(*)')
+        .maybeSingle()
+      data = retry.data
+      error = retry.error
+      if (!error) {
+        patch.note = nextNote
+        patch.guest_name = guestName
+        onUpdated?.(patch)
+      }
+    }
+
+    if (error) {
+      await queueAssignDriver(payload)
       return
     }
 
@@ -81,6 +119,8 @@ export function useAssignDriver(onUpdated?: (patch: AssignmentPatch) => void) {
         companion_id: data.companion_id,
         companion2_id: data.companion2_id,
         self_transport: data.self_transport,
+        guest_name: data.guest_name ?? guestName,
+        note: data.note,
       })
     }
 
@@ -89,7 +129,7 @@ export function useAssignDriver(onUpdated?: (patch: AssignmentPatch) => void) {
       if (driverId && actorId && driverId !== actorId) {
         supabase.functions.invoke('notify-driver', { body: { leg_id: legId } })
           .catch(e => console.warn('notify-driver:', e))
-      } else {
+      } else if (!guestName) {
         supabase.functions.invoke('notify-parents', {
           body: {
             leg_id: legId,
@@ -107,6 +147,7 @@ export function useAssignDriver(onUpdated?: (patch: AssignmentPatch) => void) {
     driverId: string | null,
     companionIds: string[] = [],
     selfTransport = false,
+    guestName: string | null = null,
   ) {
     setAssigningLegId(legId)
     try {
@@ -116,6 +157,7 @@ export function useAssignDriver(onUpdated?: (patch: AssignmentPatch) => void) {
         companionIds[0] ?? null,
         companionIds[1] ?? null,
         selfTransport,
+        guestName,
         true,
       )
     } finally {
@@ -128,6 +170,7 @@ export function useAssignDriver(onUpdated?: (patch: AssignmentPatch) => void) {
     driverId: string | null,
     companionIds: string[] = [],
     selfTransport = false,
+    guestName: string | null = null,
   ) {
     if (legIds.length === 0) return
     setAssigningLegId(legIds[0])
@@ -139,6 +182,7 @@ export function useAssignDriver(onUpdated?: (patch: AssignmentPatch) => void) {
           companionIds[0] ?? null,
           companionIds[1] ?? null,
           selfTransport,
+          guestName,
           i === 0,
         )
       }
@@ -148,11 +192,11 @@ export function useAssignDriver(onUpdated?: (patch: AssignmentPatch) => void) {
   }
 
   async function release(legId: string) {
-    await assign(legId, null, [], false)
+    await assign(legId, null, [], false, null)
   }
 
   async function claim(legId: string, selfPersonId: string) {
-    await assign(legId, selfPersonId, [], false)
+    await assign(legId, selfPersonId, [], false, null)
   }
 
   return { assign, assignMany, release, claim, assigningLegId, online }

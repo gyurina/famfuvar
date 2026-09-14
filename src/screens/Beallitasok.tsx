@@ -15,24 +15,30 @@ import { Icon } from '../components/Icon'
 import { BreakSheet } from '../components/BreakSheet'
 import { useToast } from '../components/Toast'
 type Tab = 'helyszin' | 'utido' | 'elerheto' | 'nem_elerheto' | 'csoportok' | 'szunetek' | 'naptarak' | 'push' | 'diagnozis'
-export type SettingsSection = 'helyszinek' | 'szunetek' | 'ertesitesek'
+export type SettingsSection = 'helyszinek' | 'szunetek' | 'ertesitesek' | 'uzenet' | 'naptarak'
 
 const SECTION_TABS: Record<SettingsSection, Tab[]> = {
   helyszinek: ['helyszin', 'utido'],
   szunetek: ['szunetek'],
-  ertesitesek: ['push', 'naptarak'],
+  ertesitesek: [],
+  uzenet: ['push'],
+  naptarak: ['naptarak'],
 }
 
 const SECTION_DEFAULT: Record<SettingsSection, Tab> = {
   helyszinek: 'helyszin',
   szunetek: 'szunetek',
-  ertesitesek: 'push',
+  ertesitesek: 'helyszin',
+  uzenet: 'push',
+  naptarak: 'naptarak',
 }
 
 const SECTION_TITLE: Record<SettingsSection, string> = {
   helyszinek: copy.settings.tabs.locations,
   szunetek: copy.settings.tabs.absences,
   ertesitesek: copy.more.notifications,
+  uzenet: copy.more.message,
+  naptarak: copy.more.google,
 }
 
 const inp: React.CSSProperties = {
@@ -756,7 +762,7 @@ export function Beallitasok({ section }: { section?: SettingsSection } = {}) {
         chrome={!section}
       />
 
-      {!section && (
+      {(!section || section === 'ertesitesek') && (
       <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--color-border)' }}>
         <div className="section-label" style={{ marginBottom: 10 }}>{copy.settings.appearance}</div>
         <div style={{
@@ -1271,7 +1277,7 @@ export function Beallitasok({ section }: { section?: SettingsSection } = {}) {
         {/* ══════════════════════════════════════
             NAPTÁRAK (read-only)
         ══════════════════════════════════════ */}
-        {tab === 'naptarak' && (
+        {tab === 'naptarak' && section !== 'ertesitesek' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
             {/* Google Calendar csatlakoztatás */}
@@ -1514,7 +1520,7 @@ export function Beallitasok({ section }: { section?: SettingsSection } = {}) {
           </div>
         )}
 
-        {tab === 'push' && (
+        {tab === 'push' && section !== 'ertesitesek' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <p style={{ fontSize: 12, color: 'var(--color-muted)', margin: '0 0 4px' }}>
               {copy.settings.pushCustomHint}

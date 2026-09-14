@@ -145,6 +145,8 @@ export interface TransportLeg {
   note: string | null
   self_transport: boolean
   trip_id: string | null
+  /** Név szerinti egyedi sofőr, törzsadat nélkül. */
+  guest_name?: string | null
 }
 
 export interface ExternalCalendar {

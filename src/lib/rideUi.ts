@@ -20,10 +20,32 @@ const ROLE_RANK: Record<PersonRole, number> = {
   child: 3,
 }
 
+/** Törzs nélküli egyedi sofőr a `guest_name` oszlopban, vagy a `egyedi:` jegyzetben. */
+export const GUEST_NOTE_PREFIX = 'egyedi:'
+
+export function guestNameOf(leg: Pick<RideRow, 'guest_name' | 'note'> | Pick<TransportLeg, 'guest_name' | 'note'>): string | null {
+  const named = leg.guest_name?.trim()
+  if (named) return named
+  const note = leg.note?.trim() ?? ''
+  if (note.toLowerCase().startsWith(GUEST_NOTE_PREFIX)) {
+    const n = note.slice(GUEST_NOTE_PREFIX.length).trim()
+    return n || null
+  }
+  return null
+}
+
+export function isRideCovered(leg: Pick<RideRow, 'driver_id' | 'self_transport' | 'guest_name' | 'note'>): boolean {
+  return !!leg.self_transport || !!leg.driver_id || !!guestNameOf(leg)
+}
+
+export function isRideOpen(leg: RideRow): boolean {
+  return !isRideCovered(leg) && leg.occurrence?.status !== 'cancelled'
+}
+
 export function rideState(leg: RideRow): RideState {
   if (leg.occurrence?.status === 'cancelled') return 'cancelled'
   if (leg.self_transport) return 'self'
-  if (leg.driver_id) return 'assigned'
+  if (leg.driver_id || guestNameOf(leg)) return 'assigned'
   return 'open'
 }
 

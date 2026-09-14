@@ -18,6 +18,9 @@ import { useMidnightRefresh } from '../hooks/useMidnightRefresh'
 import {
   blocksForRide,
   companionIdsOf,
+  guestNameOf,
+  isRideCovered,
+  isRideOpen,
   nextCompanions,
   rideState,
   type RideRow,
@@ -52,11 +55,12 @@ export function Ma() {
   }
   const { assign, release, claim } = useAssignDriver(applyPatch)
 
-  function toastRide(leg: LegWithOcc, nextDriverId: string | null, self = false) {
+  function toastRide(leg: LegWithOcc, nextDriverId: string | null, self = false, guest: string | null = null) {
     const prev = {
       driver_id: leg.driver_id,
       companions: companionIdsOf(leg).filter(id => id !== leg.driver_id),
       self: leg.self_transport,
+      guest: guestNameOf(leg),
     }
     show({
       text: rideWriteToast({
@@ -64,8 +68,9 @@ export function Ma() {
         child: personById(leg.occurrence?.person_id ?? null),
         direction: leg.direction,
         self,
+        guest,
       }),
-      undo: () => assign(leg.id, prev.driver_id, prev.companions, prev.self),
+      undo: () => assign(leg.id, prev.driver_id, prev.companions, prev.self, prev.guest),
     })
   }
 
@@ -88,20 +93,16 @@ export function Ma() {
     (l.driver_id === person?.id || l.companion_id === person?.id || l.companion2_id === person?.id)
     && !pinnedOpenIds.has(l.id)
   )
-  const otherLegs  = allLegs.filter(l =>
-    l.driver_id &&
-    l.driver_id !== person?.id &&
-    l.companion_id !== person?.id &&
-    l.companion2_id !== person?.id &&
-    !pinnedOpenIds.has(l.id)
-  )
+  const otherLegs  = allLegs.filter(l => {
+    if (pinnedOpenIds.has(l.id) || l.self_transport) return false
+    const mine = l.driver_id === person?.id || l.companion_id === person?.id || l.companion2_id === person?.id
+    if (mine) return false
+    return isRideCovered(l)
+  })
   const orphanLegs = allLegs.filter(l =>
-    pinnedOpenIds.has(l.id) ||
-    (!l.driver_id && !l.self_transport && l.occurrence?.status !== 'cancelled')
+    pinnedOpenIds.has(l.id) || isRideOpen(l)
   )
-  const hasIssue   = allLegs.some(l =>
-    !l.driver_id && !l.self_transport && l.occurrence?.status !== 'cancelled'
-  )
+  const hasIssue   = allLegs.some(l => isRideOpen(l))
 
   return (
     <div style={{ background: 'var(--color-bg)', minHeight: '100dvh' }}>
@@ -242,6 +243,7 @@ export function Ma() {
                 {otherLegs.map(leg => {
                   const occ       = leg.occurrence
                   const driver    = personById(leg.driver_id)
+                  const guest     = guestNameOf(leg)
                   const companion = personById(leg.companion_id)
                   const child     = personById(occ.person_id)
                   return (
@@ -264,10 +266,12 @@ export function Ma() {
                           background: 'rgba(79,156,249,0.1)', color: 'var(--color-accent-ink)',
                           border: '1px solid rgba(79,156,249,0.2)',
                         }}>
-                          {driver && (
-                            <Avatar person={driver} size={26} householdNames={householdNames} />
-                          )}
-                          {driver?.display_name ?? copy.common.unknown}
+                          {driver
+                            ? <Avatar person={driver} size={26} householdNames={householdNames} />
+                            : guest
+                              ? <Avatar variant="guest" size={26} />
+                              : null}
+                          {driver?.display_name ?? guest ?? copy.common.unknown}
                           {companion && ` + ${companion.display_name}`}
                         </div>
                       </div>
@@ -316,6 +320,7 @@ export function Ma() {
                         assign(leg.id, leg.driver_id, nextCompanions(companionIdsOf(leg).filter(c => c !== leg.driver_id), id))
                       }}
                       onSelf={() => { assign(leg.id, null, [], true); toastRide(leg, null, true) }}
+                      onGuest={name => { assign(leg.id, null, [], false, name); toastRide(leg, null, false, name) }}
                       onRelease={() => { release(leg.id); toastRide(leg, null) }}
                       onClaim={person?.id ? () => { claim(leg.id, person.id); toastRide(leg, person.id) } : undefined}
                       onMerge={() => {}}
