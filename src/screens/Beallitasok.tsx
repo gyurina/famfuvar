@@ -5,13 +5,15 @@ import { useHousehold } from '../hooks/useHousehold'
 import { useAuth } from '../lib/auth'
 import { useRole } from '../hooks/useRole'
 import { getPref, setPref, PREF_HIDE_CANCELLED } from '../lib/prefs'
-import type { ExternalCalendar, Location, TravelTime, DriverAvailability, UnavailableBlock, TravelGroup, TravelGroupMember, PushLog, BreakPeriod, BreakReason, PersonRole } from '../types'
+import type { ExternalCalendar, Location, TravelTime, DriverAvailability, UnavailableBlock, TravelGroup, TravelGroupMember, PushLog, BreakPeriod, PersonRole } from '../types'
 import { isPushSupported, isPushSubscribed, subscribeToPush, unsubscribeFromPush } from '../lib/push'
 import { startGoogleAuth, syncNow, disconnectGoogle, fetchGoogleCalendars } from '../lib/googleCalendar'
 import { forceRegenerateLegs } from '../lib/occurrences'
 import { copy } from '../copy'
 import { formatShortDate, formatDateTime } from '../lib/format'
 import { Icon } from '../components/Icon'
+import { BreakSheet } from '../components/BreakSheet'
+import { useToast } from '../components/Toast'
 type Tab = 'helyszin' | 'utido' | 'elerheto' | 'nem_elerheto' | 'csoportok' | 'szunetek' | 'naptarak' | 'push' | 'diagnozis'
 export type SettingsSection = 'helyszinek' | 'szunetek' | 'ertesitesek'
 
@@ -56,6 +58,7 @@ const btnDanger: React.CSSProperties = {
 export function Beallitasok({ section }: { section?: SettingsSection } = {}) {
   const { signOut, person } = useAuth()
   const { canEditHousehold } = useRole()
+  const { show } = useToast()
   const {
     persons, drivers,
     locations: initLocations,
@@ -492,12 +495,6 @@ export function Beallitasok({ section }: { section?: SettingsSection } = {}) {
   const [breakPeriods, setBreakPeriods] = useState<BreakPeriod[]>([])
   const [breakLoading, setBreakLoading] = useState(false)
   const [newBreakOpen, setNewBreakOpen] = useState(false)
-  const [newBreakPersonId, setNewBreakPersonId] = useState('')
-  const [newBreakFrom, setNewBreakFrom] = useState('')
-  const [newBreakTo, setNewBreakTo] = useState('')
-  const [newBreakReason, setNewBreakReason] = useState<BreakReason>('vacation')
-  const [newBreakNote, setNewBreakNote] = useState('')
-  const [breakSaving, setBreakSaving] = useState(false)
   const [breakError, setBreakError] = useState<string | null>(null)
   const [breakMsg, setBreakMsg] = useState<string | null>(null)
 
@@ -513,36 +510,6 @@ export function Beallitasok({ section }: { section?: SettingsSection } = {}) {
       })
   }, [householdId, tab])
 
-  async function addBreakPeriod() {
-    if (!householdId || !newBreakPersonId || !newBreakFrom || !newBreakTo) {
-      setBreakError(copy.settings.breakFields)
-      return
-    }
-    if (newBreakFrom > newBreakTo) {
-      setBreakError(copy.settings.breakOrder)
-      return
-    }
-    setBreakSaving(true); setBreakError(null); setBreakMsg(null)
-    const { data, error } = await supabase.from('break_period').insert({
-      household_id: householdId,
-      person_id: newBreakPersonId,
-      date_from: newBreakFrom,
-      date_to: newBreakTo,
-      reason: newBreakReason,
-      note: newBreakNote.trim() || null,
-    }).select().single()
-    if (error) { setBreakError(error.message); setBreakSaving(false); return }
-    const bp = data as BreakPeriod
-    setBreakPeriods(bs => [bp, ...bs])
-    // Apply: cancel occurrences in the range
-    const { data: cnt } = await supabase.rpc('apply_break_period', { p_break_id: bp.id })
-    setBreakMsg(copy.settings.breakSaved(cnt ?? 0))
-    setNewBreakOpen(false)
-    setNewBreakPersonId(''); setNewBreakFrom(''); setNewBreakTo('')
-    setNewBreakReason('vacation'); setNewBreakNote('')
-    setBreakSaving(false)
-  }
-
   async function deleteBreakPeriod(bp: BreakPeriod) {
     if (!confirm(copy.settings.confirmDeleteBreak)) return
     setBreakMsg(null)
@@ -555,6 +522,7 @@ export function Beallitasok({ section }: { section?: SettingsSection } = {}) {
     await supabase.from('break_period').delete().eq('id', bp.id)
     setBreakPeriods(bs => bs.filter(b => b.id !== bp.id))
     setBreakMsg(copy.settings.breakDeleted(cnt ?? 0))
+    show({ text: copy.settings.breakDeleted(cnt ?? 0) })
   }
 
   // ── Diagnózis state ──────────────────────────────────────────────────────
@@ -1655,72 +1623,23 @@ export function Beallitasok({ section }: { section?: SettingsSection } = {}) {
             )}
 
             {/* Új szünet */}
-            {!newBreakOpen ? (
-              <button style={btnPrimary} onClick={() => { setNewBreakOpen(true); setBreakError(null); setBreakMsg(null) }}>
-                {copy.settings.breakAdd}
-              </button>
-            ) : (
-              <div style={{
-                borderRadius: 12, padding: '14px',
-                background: 'var(--color-surface)', border: '1px solid var(--color-border)',
-                display: 'flex', flexDirection: 'column', gap: 10,
-              }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  {copy.settings.breakNew}
-                </div>
-
-                {/* Személy */}
-                <div>
-                  <div style={{ fontSize: 12, color: 'var(--color-muted)', marginBottom: 4 }}>{copy.common.personRequired}</div>
-                  <select style={inp} value={newBreakPersonId} onChange={e => setNewBreakPersonId(e.target.value)}>
-                    <option value="">{copy.common.pick}</option>
-                    {persons.map(p => (
-                      <option key={p.id} value={p.id}>{p.display_name}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Dátumok */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                  <div>
-                    <div style={{ fontSize: 12, color: 'var(--color-muted)', marginBottom: 4 }}>{copy.common.from}</div>
-                    <input type="date" style={inp} value={newBreakFrom}
-                      onChange={e => setNewBreakFrom(e.target.value)} />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 12, color: 'var(--color-muted)', marginBottom: 4 }}>{copy.common.to}</div>
-                    <input type="date" style={inp} value={newBreakTo}
-                      onChange={e => setNewBreakTo(e.target.value)} />
-                  </div>
-                </div>
-
-                {/* Ok */}
-                <div>
-                  <div style={{ fontSize: 12, color: 'var(--color-muted)', marginBottom: 4 }}>{copy.common.reason}</div>
-                  <select style={inp} value={newBreakReason}
-                    onChange={e => setNewBreakReason(e.target.value as BreakReason)}>
-                    <option value="vacation">{copy.settings.reasonVacationLong}</option>
-                    <option value="illness">{copy.settings.reasonIllness}</option>
-                    <option value="other">{copy.settings.reasonOther}</option>
-                  </select>
-                </div>
-
-                {/* Megjegyzés */}
-                <div>
-                  <div style={{ fontSize: 12, color: 'var(--color-muted)', marginBottom: 4 }}>{copy.form.note}</div>
-                  <input style={inp} value={newBreakNote} placeholder={copy.settings.breakNotePlaceholder}
-                    onChange={e => setNewBreakNote(e.target.value)} />
-                </div>
-
-                <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
-                  <button style={btnPrimary} disabled={breakSaving} onClick={addBreakPeriod}>
-                    {breakSaving ? copy.common.working : copy.common.save}
-                  </button>
-                  <button style={btnGhost} onClick={() => { setNewBreakOpen(false); setBreakError(null) }}>
-                    {copy.common.cancel}
-                  </button>
-                </div>
-              </div>
+            <button style={btnPrimary} onClick={() => { setNewBreakOpen(true); setBreakError(null); setBreakMsg(null) }}>
+              {copy.settings.breakAdd}
+            </button>
+            {newBreakOpen && householdId && (
+              <BreakSheet
+                persons={persons}
+                householdId={householdId}
+                householdNames={persons.map(p => p.display_name)}
+                onClose={() => setNewBreakOpen(false)}
+                onDone={() => {
+                  setNewBreakOpen(false)
+                  supabase.from('break_period').select('*')
+                    .eq('household_id', householdId)
+                    .order('date_from', { ascending: false })
+                    .then(({ data }) => setBreakPeriods((data ?? []) as BreakPeriod[]))
+                }}
+              />
             )}
 
             {/* Lista */}

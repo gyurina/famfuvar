@@ -87,6 +87,27 @@ export async function updateOccurrence(
   }
 }
 
+// Budapest timezone dinamikusan (CET=+01:00 télen, CEST=+02:00 nyáron)
+function localDt(dateStr: string, timeStr: string): Date {
+  const t = timeStr.slice(0, 5)
+  const probe = new Date(`${dateStr}T12:00:00Z`)
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Europe/Budapest',
+    hour: 'numeric',
+    hour12: false,
+  }).formatToParts(probe)
+  const localHour = parseInt(parts.find(p => p.type === 'hour')?.value ?? '14')
+  const offsetMin = (localHour - 12) * 60
+  const sign = offsetMin >= 0 ? '+' : '-'
+  const hh = String(Math.floor(Math.abs(offsetMin) / 60)).padStart(2, '0')
+  const mm = String(Math.abs(offsetMin) % 60).padStart(2, '0')
+  return new Date(`${dateStr}T${t}:00${sign}${hh}:${mm}`)
+}
+
+export function budapestIso(dateStr: string, timeStr: string): string {
+  return localDt(dateStr, timeStr).toISOString()
+}
+
 // ── Leg regenerálás ──────────────────────────────────────────────────────────
 async function regenerateLegs(
   occ: Record<string, unknown>,
@@ -154,24 +175,6 @@ async function regenerateLegs(
     return times?.find(t => t.from_location === from && t.to_location === to)?.minutes ?? 15
   }
 
-  // FIX: Budapest timezone dinamikusan (CET=+01:00 télen, CEST=+02:00 nyáron)
-  function localDt(dateStr: string, timeStr: string): Date {
-    const t = timeStr.slice(0, 5)  // 'HH:mm'
-    // Probe: déli UTC időből Budapest helyi óra → offset kiszámítása
-    const probe = new Date(`${dateStr}T12:00:00Z`)
-    const parts = new Intl.DateTimeFormat('en-US', {
-      timeZone: 'Europe/Budapest',
-      hour: 'numeric',
-      hour12: false,
-    }).formatToParts(probe)
-    const localHour = parseInt(parts.find(p => p.type === 'hour')?.value ?? '14')
-    const offsetMin = (localHour - 12) * 60  // pl. 14 → +120, 13 → +60
-    const sign = offsetMin >= 0 ? '+' : '-'
-    const hh = String(Math.floor(Math.abs(offsetMin) / 60)).padStart(2, '0')
-    const mm = String(Math.abs(offsetMin) % 60).padStart(2, '0')
-    return new Date(`${dateStr}T${t}:00${sign}${hh}:${mm}`)
-  }
-
   const arrivalDropoff  = localDt(onDate, startsAt)
   const departPickup    = localDt(onDate, endsAt)
   const travelToMin     = travelMin(homeLoc.id, locationId)
@@ -228,7 +231,7 @@ export async function closeTemplateAndCreateNew(
   patch: Partial<Pick<ScheduleTemplate,
     'starts_at' | 'ends_at' | 'location_id' | 'needs_dropoff' | 'needs_pickup' | 'title'
   >>,
-): Promise<void> {
+): Promise<string> {
   // 1. Régi sablon lezárása
   const { data: oldTemplate, error: fetchErr } = await supabase
     .from('schedule_template')
@@ -249,8 +252,8 @@ export async function closeTemplateAndCreateNew(
 
   if (closeErr) throw closeErr
 
-  // 2. Új sablon a módosított adatokkal
-  const { error: insertErr } = await supabase
+  // 2. Új sablon a módosított adatokkal — a trigger generate_horizon-t futtat
+  const { data: created, error: insertErr } = await supabase
     .from('schedule_template')
     .insert({
       household_id:  oldTemplate.household_id,
@@ -264,9 +267,12 @@ export async function closeTemplateAndCreateNew(
       needs_pickup:  patch.needs_pickup  ?? oldTemplate.needs_pickup,
       valid_from:    fromDate,
       valid_to:      null,
+      group_id:      oldTemplate.group_id,
     })
+    .select('id')
+    .single()
 
-  if (insertErr) throw insertErr
+  if (insertErr || !created) throw insertErr ?? new Error('Sablon nem található')
 
   // 3. Jövőbeli, már generált, érintetlen occurrenceök törlése
   //    (generate_horizon majd az új sablonból újragenerálja őket)
@@ -279,6 +285,7 @@ export async function closeTemplateAndCreateNew(
     .eq('is_override', false)
 
   if (delErr) throw delErr
+  return created.id
 }
 
 // ── Visszaállítás az eredeti sablonra ────────────────────────────────────────
@@ -338,6 +345,47 @@ export async function forceRegenerateLegs(occurrenceId: string): Promise<void> {
 // ── F2: Leg-sorrend formalizálása ────────────────────────────────────────────
 // Szabály: pickup (← elhozás) mindig megelőzi a dropoff-ot (→ odavisz)
 // azonos depart_at esetén. Különböző időpontok esetén a korábbi jön először.
+export async function fetchOccurrenceLegs(occurrenceId: string) {
+  const { data } = await supabase
+    .from('transport_leg')
+    .select('*')
+    .eq('occurrence_id', occurrenceId)
+  return data ?? []
+}
+
+export async function restoreCancelledOccurrence(
+  occurrenceId: string,
+  legs: Array<Record<string, unknown>>,
+): Promise<void> {
+  const personId = await currentPersonId()
+  const { error } = await supabase
+    .from('occurrence')
+    .update({
+      status: 'planned',
+      is_override: false,
+      updated_by: personId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', occurrenceId)
+  if (error) throw error
+  if (legs.length === 0) return
+  const rows = legs.map(leg => {
+    const { id: _id, ...rest } = leg
+    return rest
+  })
+  const { error: insErr } = await supabase.from('transport_leg').insert(rows)
+  if (insErr) throw insErr
+}
+
+export async function undoCloseTemplate(oldTemplateId: string, newTemplateId: string): Promise<void> {
+  await supabase.from('schedule_template').delete().eq('id', newTemplateId)
+  const { error } = await supabase
+    .from('schedule_template')
+    .update({ valid_to: null })
+    .eq('id', oldTemplateId)
+  if (error) throw error
+}
+
 export function sortLegs<T extends { direction: string; depart_at: string }>(legs: T[]): T[] {
   return [...legs].sort((a, b) => {
     const timeDiff = a.depart_at.localeCompare(b.depart_at)

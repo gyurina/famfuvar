@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { db } from '../lib/db'
 import { queueAssignDriver } from '../lib/sync'
 import { useOnlineStatus } from './useOnlineStatus'
+import { useAuth } from '../lib/auth'
 import type { TransportLeg } from '../types'
 
 export type AssignmentPatch = {
@@ -15,6 +16,7 @@ export type AssignmentPatch = {
 
 export function useAssignDriver(onUpdated?: (patch: AssignmentPatch) => void) {
   const online = useOnlineStatus()
+  const { person } = useAuth()
   const [assigningLegId, setAssigningLegId] = useState<string | null>(null)
 
   async function writeOne(
@@ -82,9 +84,21 @@ export function useAssignDriver(onUpdated?: (patch: AssignmentPatch) => void) {
       })
     }
 
-    if (notify && driverId && !selfTransport) {
-      supabase.functions.invoke('notify-driver', { body: { leg_id: legId } })
-        .catch(e => console.warn('notify-driver:', e))
+    if (notify && !selfTransport) {
+      const actorId = person?.id ?? null
+      if (driverId && actorId && driverId !== actorId) {
+        supabase.functions.invoke('notify-driver', { body: { leg_id: legId } })
+          .catch(e => console.warn('notify-driver:', e))
+      } else {
+        supabase.functions.invoke('notify-parents', {
+          body: {
+            leg_id: legId,
+            kind: driverId ? 'claim' : 'release',
+            actor_id: actorId,
+            actor_name: person?.display_name ?? '',
+          },
+        }).catch(e => console.warn('notify-parents:', e))
+      }
     }
   }
 

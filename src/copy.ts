@@ -269,6 +269,7 @@ export const copy = {
     generateHint: 'Az órarendből létrehozza a következő 30 nap programjait és fuvarjait',
     generateDone: (n: number) => `Kész: ${n} program a következő 30 napra`,
     generateError: (msg: string) => `Hiba: ${msg}`,
+    saveHint: 'Mentéskor a következő 30 nap programjai és fuvarjai automatikusan frissülnek.',
     editRow: 'Órarend szerkesztése',
     newRow: 'Új órarend-sor',
     addRow: 'Órarend hozzáadása',
@@ -493,6 +494,89 @@ export const copy = {
     long: ['Hétfő', 'Kedd', 'Szerda', 'Csütörtök', 'Péntek', 'Szombat', 'Vasárnap'] as const,
     short: ['H', 'K', 'Sze', 'Cs', 'P', 'Szo', 'V'] as const,
     mid: ['Hétf', 'Kedd', 'Szer', 'Csüt', 'Pént', 'Szom', 'Vasá'] as const,
+    on: ['hétfőn', 'kedden', 'szerdán', 'csütörtökön', 'pénteken', 'szombaton', 'vasárnap'] as const,
+  },
+
+  toast: {
+    undo: 'Visszavonás',
+    startsAt: (title: string, time: string) => `A ${title} ${time}-kor kezdődik`,
+    placeChanged: (title: string, place: string) => `A ${title} helyszíne: ${place}`,
+    noteSaved: 'Megjegyzés rögzítve',
+    cancelled: (weekday: string, title: string) => `A ${weekday}i ${title} elmarad`,
+    reset: (title: string) => `A ${title} visszaállt az órarendre`,
+    breakIllness: (name: string, until: string, n: number) =>
+      `${name} ${until}-ig beteg — ${n} program elmarad`,
+    breakVacation: (name: string, until: string, n: number) =>
+      `${name} ${until}-ig szünetel — ${n} program elmarad`,
+    breakOther: (name: string, until: string, n: number) =>
+      `${name} ${until}-ig kiesik — ${n} program elmarad`,
+    programAdded: (title: string, n: number) =>
+      n === 0 ? `${title} felvéve`
+      : n === 1 ? `${title} felvéve — 1 fuvarra kell sofőr`
+      : `${title} felvéve — ${n} fuvarra kell sofőr`,
+    scheduleSaved: 'Az órarend mentve — a következő 30 nap programjai frissülnek',
+    released: (childAcc: string) => `${childAcc} fuvarja újra nyitott`,
+    self: (childAcc: string) => `${childAcc} önállóan megy`,
+  },
+
+  sheet: {
+    programEdit: 'Program módosítása',
+    editTime: 'Időpontot módosítok',
+    editPlace: 'Helyszínt módosítok',
+    writeNote: 'Megjegyzést írok',
+    cancel: 'Elmarad',
+    cancelSub: (n: number) =>
+      n <= 0 ? 'A program elmarad'
+      : n === 1 ? 'A fuvar is törlődik'
+      : n === 2 ? 'A két fuvar is törlődik'
+      : `A ${n} fuvar is törlődik`,
+    reset: 'Visszaállítom az órarendre',
+    resetSub: 'Az eddigi módosítások törlődnek',
+    timeTitle: 'Időpont',
+    placeTitle: 'Helyszín',
+    noteTitle: 'Megjegyzés',
+    cancelTitle: 'Elmarad',
+    resetTitle: 'Visszaállítás',
+    validFrom: 'Mikortól érvényes?',
+    thisDay: 'Csak ezen a napon',
+    everyWeekday: (dayOn: string) => `Mostantól minden ${dayOn}`,
+    everyWeekdaySub: 'Az órarend is módosul',
+    modify: 'Módosítom',
+    cancelPrimary: 'Lemondom',
+    resetPrimary: 'Visszaállítom',
+    breakTitle: 'Új szünet',
+    breakSub: 'Betegség, vakáció vagy más',
+    who: 'Kit érint?',
+    why: 'Miért?',
+    howLong: 'Meddig?',
+    from: 'Mettől',
+    until: 'Meddig',
+    todayOnly: 'Csak ma',
+    threeDays: '3 nap',
+    weekEnd: 'A hét végéig',
+    reasonIllness: 'Beteg',
+    reasonVacation: 'Szünet',
+    reasonOther: 'Más',
+    previewTitle: 'Ez a mentés után történik',
+    previewNone: 'Ebben az időszakban nincs program.',
+    preview: (programs: number, rides: number, names: string) => {
+      const p = programs === 1 ? '1 program elmarad' : `${programs} program elmarad`
+      const r = rides === 0 ? '' : rides === 1 ? ', és 1 fuvar törlődik' : `, és ${rides} fuvar törlődik`
+      const who = names ? `. ${names} értesítést kap.` : '.'
+      return `${p}${r}${who}`
+    },
+    saveBreak: 'Rögzítem',
+    newTitle: 'Új program',
+    what: 'Mi a program?',
+    whatPlaceholder: 'pl. Fogorvos',
+    forWhom: 'Kinek?',
+    where: 'Hol lesz?',
+    repeats: (dayOn: string) => `Ismétlődik minden ${dayOn}`,
+    repeatsSub: 'Bekerül az órarendbe',
+    needsRide: 'Kell hozzá fuvar?',
+    someoneTakes: 'Valaki viszi',
+    someoneCollects: 'Valaki begyűjti',
+    add: 'Felveszem',
   },
 
   more: {

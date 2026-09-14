@@ -12,3 +12,6 @@ verify_jwt = true
 
 [functions.notify-driver]
 verify_jwt = true
+
+[functions.notify-parents]
+verify_jwt = true

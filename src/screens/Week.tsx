@@ -7,8 +7,10 @@ import { SectionHead } from '../components/SectionHead'
 import { EmptyState } from '../components/EmptyState'
 import { Avatar } from '../components/Avatar'
 import { Pill } from '../components/Pill'
-import { OccurrenceOverrideModal } from '../components/OccurrenceOverrideModal'
+import { ProgramSheet } from '../components/ProgramSheet'
+import { NewEventSheet } from '../components/NewEventSheet'
 import { Icon } from '../components/Icon'
+import { useToast } from '../components/Toast'
 import { supabase } from '../lib/supabase'
 import { db } from '../lib/db'
 import { useHousehold } from '../hooks/useHousehold'
@@ -18,6 +20,7 @@ import { useAssignDriver, type AssignmentPatch } from '../hooks/useAssignDriver'
 import { getPref, PREF_HIDE_CANCELLED } from '../lib/prefs'
 import { copy } from '../copy'
 import { formatWeekRange, formatDayTitle, toIsoDate, directionWord } from '../lib/format'
+import { rideWriteToast } from '../lib/assignmentToast'
 import { sortLegs } from '../lib/occurrences'
 import type { Occurrence, TransportLeg, ScheduleTemplate } from '../types'
 
@@ -27,12 +30,14 @@ export function Week() {
   const nav = useNavigate()
   const { person } = useAuth()
   const { isAdmin, canAssignOthers, canSelfAssign, isBabysitter, canReleaseOwn } = useRole()
-  const { householdId, personById, locationById, locations, persons } = useHousehold()
+  const { householdId, personById, locationById, locations, persons, children, home } = useHousehold()
+  const { show } = useToast()
   const [weekOffset, setWeekOffset] = useState(0)
   const [items, setItems] = useState<OccWithLegs[]>([])
   const [loading, setLoading] = useState(true)
   const [templates, setTemplates] = useState<ScheduleTemplate[]>([])
   const [selectedOcc, setSelectedOcc] = useState<Occurrence | null>(null)
+  const [showNew, setShowNew] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)
   const [selectedDay, setSelectedDay] = useState(toIsoDate(new Date()))
   const dayRefs = useRef<Record<string, HTMLDivElement | null>>({})
@@ -49,7 +54,7 @@ export function Week() {
       legs: o.legs.map(l => l.id === patch.id ? { ...l, ...patch } : l),
     })))
   }
-  const { claim, release } = useAssignDriver(applyPatch)
+  const { claim, release, assign } = useAssignDriver(applyPatch)
 
   useEffect(() => {
     if (!householdId) return
@@ -273,7 +278,18 @@ export function Week() {
                                       <button
                                         type="button"
                                         className="week-ride-action claim"
-                                        onClick={() => claim(leg.id, myId)}
+                                        onClick={() => {
+                                          claim(leg.id, myId)
+                                          show({
+                                            text: rideWriteToast({
+                                              driver: person,
+                                              child: personById(occ.person_id),
+                                              direction: leg.direction,
+                                              self: false,
+                                            }),
+                                            undo: () => release(leg.id),
+                                          })
+                                        }}
                                       >
                                         {copy.rides.claim}
                                       </button>
@@ -298,7 +314,19 @@ export function Week() {
                                       <button
                                         type="button"
                                         className="week-ride-action release"
-                                        onClick={() => release(leg.id)}
+                                        onClick={() => {
+                                          const prevDriver = leg.driver_id
+                                          release(leg.id)
+                                          show({
+                                            text: rideWriteToast({
+                                              driver: null,
+                                              child: personById(occ.person_id),
+                                              direction: leg.direction,
+                                              self: false,
+                                            }),
+                                            undo: () => prevDriver ? assign(leg.id, prevDriver) : claim(leg.id, myId!),
+                                          })
+                                        }}
                                       >
                                         {copy.rides.cantTake}
                                       </button>
@@ -323,7 +351,7 @@ export function Week() {
         <button
           type="button"
           className="week-fab"
-          onClick={() => nav('/het/uj')}
+          onClick={() => setShowNew(true)}
           aria-label={copy.a11y.addEvent}
         >
           <Icon name="plus" size={26} />
@@ -331,14 +359,29 @@ export function Week() {
       )}
 
       {selectedOcc && (
-        <OccurrenceOverrideModal
+        <ProgramSheet
           occ={selectedOcc}
           template={templates.find(t => t.id === selectedOcc.template_id) ?? null}
           locations={locations}
-          isAdmin={isAdmin}
+          personName={personById(selectedOcc.person_id)?.display_name}
           onClose={() => setSelectedOcc(null)}
           onDone={() => {
             setSelectedOcc(null)
+            setReloadKey(k => k + 1)
+          }}
+        />
+      )}
+      {showNew && householdId && (
+        <NewEventSheet
+          householdId={householdId}
+          date={selectedDay}
+          childrenPeople={children}
+          locations={locations}
+          home={home}
+          householdNames={householdNames}
+          onClose={() => setShowNew(false)}
+          onDone={() => {
+            setShowNew(false)
             setReloadKey(k => k + 1)
           }}
         />

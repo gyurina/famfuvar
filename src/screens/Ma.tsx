@@ -6,11 +6,15 @@ import { useAuth } from '../lib/auth'
 import { useRole } from '../hooks/useRole'
 import { useAssignDriver, type AssignmentPatch } from '../hooks/useAssignDriver'
 import type { Occurrence } from '../types'
-import { BreakModal } from '../components/BreakModal'
-import { QuickLogModal } from '../components/QuickLogModal'
+import { BreakSheet } from '../components/BreakSheet'
+import { NewEventSheet } from '../components/NewEventSheet'
+import { ProgramSheet } from '../components/ProgramSheet'
 import { RideCard } from '../components/RideCard'
 import { copy } from '../copy'
-import { formatDayLong, formatTime, toIsoDate, directionWord } from '../lib/format'
+import { formatDayLong, formatTime, directionWord } from '../lib/format'
+import { rideWriteToast } from '../lib/assignmentToast'
+import { useToast } from '../components/Toast'
+import { useMidnightRefresh } from '../hooks/useMidnightRefresh'
 import {
   blocksForRide,
   companionIdsOf,
@@ -27,17 +31,19 @@ type LegWithOcc = RideRow & { occurrence: Occurrence }
 export function Ma() {
   const { person } = useAuth()
   const { canAssignOthers, canSelfAssign, canEditOccurrence, canReleaseOwn } = useRole()
-  const { personById, locationById, householdId, persons, drivers } = useHousehold()
+  const { personById, locationById, householdId, persons, drivers, children, locations, home } = useHousehold()
+  const { show } = useToast()
+  const today = useMidnightRefresh()
   const [showBreak,    setShowBreak]    = useState(false)
   const [breakPersonId,setBreakPersonId]= useState<string | undefined>(undefined)
-  const [showQuickLog, setShowQuickLog] = useState(false)
+  const [showNew,      setShowNew]      = useState(false)
+  const [selectedOcc,  setSelectedOcc]  = useState<Occurrence | null>(null)
   const [reloadKey,    setReloadKey]    = useState(0)
   const [allLegs, setAllLegs] = useState<LegWithOcc[]>([])
   const [loading, setLoading] = useState(true)
   const [pinnedOpenIds, setPinnedOpenIds] = useState<Set<string>>(new Set())
 
-  const today        = toIsoDate(new Date())
-  const todayDisplay = formatDayLong(new Date())
+  const todayDisplay = formatDayLong(today)
   const householdNames = persons.map(p => p.display_name)
 
   function applyPatch(patch: AssignmentPatch) {
@@ -45,6 +51,23 @@ export function Ma() {
     setPinnedOpenIds(prev => new Set(prev).add(patch.id))
   }
   const { assign, release, claim } = useAssignDriver(applyPatch)
+
+  function toastRide(leg: LegWithOcc, nextDriverId: string | null, self = false) {
+    const prev = {
+      driver_id: leg.driver_id,
+      companions: companionIdsOf(leg).filter(id => id !== leg.driver_id),
+      self: leg.self_transport,
+    }
+    show({
+      text: rideWriteToast({
+        driver: nextDriverId ? personById(nextDriverId) : null,
+        child: personById(leg.occurrence?.person_id ?? null),
+        direction: leg.direction,
+        self,
+      }),
+      undo: () => assign(leg.id, prev.driver_id, prev.companions, prev.self),
+    })
+  }
 
   useEffect(() => {
     if (!householdId || !person) return
@@ -284,16 +307,19 @@ export function Ma() {
                       viewerId={person?.id}
                       fromHome={!!fromLoc?.is_home}
                       fromName={fromLoc?.name ?? null}
-                      onAssign={driverId => assign(leg.id, driverId, companionIdsOf(leg).filter(id => id !== driverId))}
+                      onAssign={driverId => {
+                        assign(leg.id, driverId, companionIdsOf(leg).filter(id => id !== driverId))
+                        toastRide(leg, driverId)
+                      }}
                       onCompanion={id => {
-                        if (!leg.driver_id) { assign(leg.id, id); return }
+                        if (!leg.driver_id) { assign(leg.id, id); toastRide(leg, id); return }
                         assign(leg.id, leg.driver_id, nextCompanions(companionIdsOf(leg).filter(c => c !== leg.driver_id), id))
                       }}
-                      onSelf={() => assign(leg.id, null, [], true)}
-                      onRelease={() => release(leg.id)}
-                      onClaim={person?.id ? () => claim(leg.id, person.id) : undefined}
+                      onSelf={() => { assign(leg.id, null, [], true); toastRide(leg, null, true) }}
+                      onRelease={() => { release(leg.id); toastRide(leg, null) }}
+                      onClaim={person?.id ? () => { claim(leg.id, person.id); toastRide(leg, person.id) } : undefined}
                       onMerge={() => {}}
-                      onOpenMenu={() => {}}
+                      onOpenMenu={() => setSelectedOcc(occ)}
                     />
                   )
                 })}
@@ -327,9 +353,9 @@ export function Ma() {
           {copy.ma.illness}
         </button>
         <button
-          onClick={() => setShowQuickLog(true)}
-          title={copy.quickLog.title}
-          aria-label={copy.quickLog.title}
+          onClick={() => setShowNew(true)}
+          title={copy.a11y.addEvent}
+          aria-label={copy.a11y.addEvent}
           style={{
             width: 50, height: 50, borderRadius: '50%',
             background: 'var(--color-blue)', border: 'none',
@@ -341,20 +367,34 @@ export function Ma() {
       </div>
 
       {showBreak && householdId && (
-        <BreakModal
+        <BreakSheet
           persons={persons}
           householdId={householdId}
-          quickIllness={breakPersonId ? { personId: breakPersonId } : undefined}
+          householdNames={householdNames}
+          quickIllness={breakPersonId ? { personId: breakPersonId } : { personId: children[0]?.id ?? persons[0]?.id ?? '' }}
           onClose={() => setShowBreak(false)}
           onDone={() => { setShowBreak(false); setReloadKey(k => k + 1) }}
         />
       )}
-      {showQuickLog && householdId && (
-        <QuickLogModal
+      {showNew && householdId && (
+        <NewEventSheet
           householdId={householdId}
-          persons={persons}
-          onClose={() => setShowQuickLog(false)}
-          onDone={() => { setShowQuickLog(false); setReloadKey(k => k + 1) }}
+          date={today}
+          childrenPeople={children}
+          locations={locations}
+          home={home}
+          householdNames={householdNames}
+          onClose={() => setShowNew(false)}
+          onDone={() => { setShowNew(false); setReloadKey(k => k + 1) }}
+        />
+      )}
+      {selectedOcc && (
+        <ProgramSheet
+          occ={selectedOcc}
+          locations={locations}
+          personName={personById(selectedOcc.person_id)?.display_name}
+          onClose={() => setSelectedOcc(null)}
+          onDone={() => { setSelectedOcc(null); setReloadKey(k => k + 1) }}
         />
       )}
     </div>

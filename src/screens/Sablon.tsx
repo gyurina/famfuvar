@@ -7,6 +7,7 @@ import type { ScheduleTemplate, TravelGroup } from '../types'
 import { copy } from '../copy'
 import { formatShortDate, toIsoDate } from '../lib/format'
 import { Icon } from '../components/Icon'
+import { useToast } from '../components/Toast'
 
 type Mode = 'single' | 'group'
 
@@ -36,6 +37,7 @@ const EMPTY: FormData = {
 export function Sablon({ embedded = false }: { embedded?: boolean }) {
   const { children, locations, householdId } = useHousehold()
   const { canEditSchedule } = useRole()
+  const { show } = useToast()
   const [templates, setTemplates] = useState<ScheduleTemplate[]>([])
   const [groups, setGroups] = useState<TravelGroup[]>([])
   const [loading, setLoading] = useState(true)
@@ -45,8 +47,6 @@ export function Sablon({ embedded = false }: { embedded?: boolean }) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
-  const [generating, setGenerating] = useState(false)
-  const [genResult, setGenResult] = useState<string | null>(null)
 
   useEffect(() => {
     if (!householdId) return
@@ -140,24 +140,14 @@ export function Sablon({ embedded = false }: { embedded?: boolean }) {
     }
 
     setSaving(false); setShowForm(false)
+    show({ text: copy.toast.scheduleSaved })
   }
 
   async function handleDelete(id: string) {
     await supabase.from('schedule_template').delete().eq('id', id)
     setTemplates(prev => prev.filter(t => t.id !== id))
     setDeleteConfirm(null); setShowForm(false)
-  }
-
-  async function generateHorizon() {
-    if (!householdId) return
-    setGenerating(true); setGenResult(null)
-    const { data, error: err } = await supabase.rpc('generate_horizon', {
-      p_household_id: householdId,
-      p_days_ahead:   30,
-    })
-    if (err) setGenResult(copy.schedule.generateError(err.message))
-    else setGenResult(copy.schedule.generateDone(data ?? 0))
-    setGenerating(false)
+    show({ text: copy.toast.scheduleSaved })
   }
 
   const childMap = Object.fromEntries(children.map(c => [c.id, c]))
@@ -199,35 +189,7 @@ export function Sablon({ embedded = false }: { embedded?: boolean }) {
       />
 
       {canEditSchedule && (
-      <div style={{ margin: '12px 16px 0', padding: '12px 14px', borderRadius: 'var(--r-md)', background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 600 }}>{copy.schedule.generate}</div>
-            <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2 }}>
-              {copy.schedule.generateHint}
-            </div>
-          </div>
-          <button
-            onClick={generateHorizon}
-            disabled={generating}
-            style={{
-              padding: '7px 14px', borderRadius: 'var(--r-sm)', flexShrink: 0,
-              background: generating ? 'var(--color-surface-2)' : 'rgba(45,216,138,0.12)',
-              color: generating ? 'var(--color-muted)' : 'var(--color-green)',
-              border: `1px solid ${generating ? 'var(--color-border)' : 'rgba(45,216,138,0.3)'}`,
-              fontWeight: 600, fontSize: 12, cursor: generating ? 'default' : 'pointer',
-            }}
-          >{generating ? copy.schedule.generating : copy.schedule.generate}</button>
-        </div>
-        {genResult && (
-          <div style={{
-            marginTop: 8, padding: '7px 10px', borderRadius: 'var(--r-sm)', fontSize: 12,
-            background: genResult.startsWith(copy.common.error) ? 'rgba(242,107,107,0.1)' : 'rgba(45,216,138,0.08)',
-            color: genResult.startsWith(copy.common.error) ? 'var(--color-red)' : 'var(--color-green)',
-            border: `1px solid ${genResult.startsWith(copy.common.error) ? 'rgba(242,107,107,0.25)' : 'rgba(45,216,138,0.2)'}`,
-          }}>{genResult}</div>
-        )}
-      </div>
+        <p className="schedule-hint">{copy.schedule.saveHint}</p>
       )}
 
       {loading && (

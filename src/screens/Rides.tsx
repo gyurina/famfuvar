@@ -4,7 +4,7 @@ import { useSearchParams } from 'react-router-dom'
 import { Header } from '../components/Header'
 import { RideCard } from '../components/RideCard'
 import { GroupedRideCard } from '../components/GroupedRideCard'
-import { OccurrenceOverrideModal } from '../components/OccurrenceOverrideModal'
+import { ProgramSheet } from '../components/ProgramSheet'
 import { FilterChips } from '../components/FilterChips'
 import { SectionHead } from '../components/SectionHead'
 import { EmptyState } from '../components/EmptyState'
@@ -21,6 +21,8 @@ import { fetchGoogleCalendars, fetchExternalEvents } from '../lib/googleCalendar
 import { sortLegs } from '../lib/occurrences'
 import { copy } from '../copy'
 import { formatTime, formatWeekRange, formatDayTitle, toIsoDate, toRideDirection } from '../lib/format'
+import { rideWriteToast } from '../lib/assignmentToast'
+import { useToast } from '../components/Toast'
 import {
   blocksForRide,
   companionIdsOf,
@@ -42,8 +44,9 @@ type RideFilter = 'open' | 'all' | 'mine'
 
 export function Rides() {
   const { person } = useAuth()
-  const { isAdmin, canAssignOthers, canSelfAssign, canEditOccurrence, canReleaseOwn } = useRole()
+  const { canAssignOthers, canSelfAssign, canEditOccurrence, canReleaseOwn } = useRole()
   const { drivers, householdId, personById, locationById, locations, travelTimes } = useHousehold()
+  const { show } = useToast()
   const online = useOnlineStatus()
   const [searchParams] = useSearchParams()
   const highlightId = searchParams.get('ride')
@@ -72,6 +75,23 @@ export function Rides() {
   }
 
   const { assign, assignMany, release, claim } = useAssignDriver(applyPatch)
+
+  function toastRide(leg: LegRow, nextDriverId: string | null, self = false) {
+    const prev = {
+      driver_id: leg.driver_id,
+      companions: companionIdsOf(leg).filter(id => id !== leg.driver_id),
+      self: leg.self_transport,
+    }
+    show({
+      text: rideWriteToast({
+        driver: nextDriverId ? personById(nextDriverId) : null,
+        child: personById(leg.occurrence?.person_id ?? null),
+        direction: leg.direction,
+        self,
+      }),
+      undo: () => assign(leg.id, prev.driver_id, prev.companions, prev.self),
+    })
+  }
 
   useEffect(() => {
     if (!householdId) return
@@ -281,14 +301,17 @@ export function Rides() {
           viewerId={myId}
           fromHome={!!fromLoc?.is_home}
           fromName={fromLoc?.name ?? null}
-          onAssign={driverId => assign(leg.id, driverId, companionIdsOf(leg).filter(id => id !== driverId))}
+          onAssign={driverId => {
+            assign(leg.id, driverId, companionIdsOf(leg).filter(id => id !== driverId))
+            toastRide(leg, driverId)
+          }}
           onCompanion={id => {
-            if (!leg.driver_id) { assign(leg.id, id); return }
+            if (!leg.driver_id) { assign(leg.id, id); toastRide(leg, id); return }
             assign(leg.id, leg.driver_id, nextCompanions(companionIdsOf(leg).filter(c => c !== leg.driver_id), id))
           }}
-          onSelf={() => assign(leg.id, null, [], true)}
-          onRelease={() => release(leg.id)}
-          onClaim={myId ? () => claim(leg.id, myId) : undefined}
+          onSelf={() => { assign(leg.id, null, [], true); toastRide(leg, null, true) }}
+          onRelease={() => { release(leg.id); toastRide(leg, null) }}
+          onClaim={myId ? () => { claim(leg.id, myId); toastRide(leg, myId) } : undefined}
           onMerge={rideId => mergeIds([leg.id, rideId])}
           onOpenMenu={() => setSelectedOcc(occ)}
         />
@@ -343,13 +366,64 @@ export function Rides() {
           householdNames={householdNames}
           durationMins={duration}
           viewerId={myId}
-          onAssign={driverId => assignMany(sorted.map(l => l.id), driverId, rep ? companionIdsOf(rep).filter(id => id !== driverId) : [])}
+          onAssign={driverId => {
+            const snapshot = sorted.map(l => ({
+              id: l.id,
+              driver_id: l.driver_id,
+              companions: companionIdsOf(l).filter(id => id !== l.driver_id),
+              self: l.self_transport,
+            }))
+            assignMany(sorted.map(l => l.id), driverId, rep ? companionIdsOf(rep).filter(id => id !== driverId) : [])
+            show({
+              text: rideWriteToast({
+                driver: personById(driverId),
+                child: personById(rep?.occurrence?.person_id ?? null),
+                direction: rep?.direction ?? 'pickup',
+                self: false,
+              }),
+              undo: () => { snapshot.forEach(s => assign(s.id, s.driver_id, s.companions, s.self)) },
+            })
+          }}
           onCompanion={id => {
             if (!rep?.driver_id) { assignMany(sorted.map(l => l.id), id); return }
             assignMany(sorted.map(l => l.id), rep.driver_id, nextCompanions(companionIdsOf(rep).filter(c => c !== rep.driver_id), id))
           }}
-          onRelease={() => assignMany(sorted.map(l => l.id), null, [])}
-          onClaim={myId ? () => assignMany(sorted.map(l => l.id), myId) : undefined}
+          onRelease={() => {
+            const snapshot = sorted.map(l => ({
+              id: l.id,
+              driver_id: l.driver_id,
+              companions: companionIdsOf(l).filter(id => id !== l.driver_id),
+              self: l.self_transport,
+            }))
+            assignMany(sorted.map(l => l.id), null, [])
+            show({
+              text: rideWriteToast({
+                driver: null,
+                child: personById(rep?.occurrence?.person_id ?? null),
+                direction: rep?.direction ?? 'pickup',
+                self: false,
+              }),
+              undo: () => { snapshot.forEach(s => assign(s.id, s.driver_id, s.companions, s.self)) },
+            })
+          }}
+          onClaim={myId ? () => {
+            const snapshot = sorted.map(l => ({
+              id: l.id,
+              driver_id: l.driver_id,
+              companions: companionIdsOf(l).filter(id => id !== l.driver_id),
+              self: l.self_transport,
+            }))
+            assignMany(sorted.map(l => l.id), myId)
+            show({
+              text: rideWriteToast({
+                driver: person,
+                child: personById(rep?.occurrence?.person_id ?? null),
+                direction: rep?.direction ?? 'pickup',
+                self: false,
+              }),
+              undo: () => { snapshot.forEach(s => assign(s.id, s.driver_id, s.companions, s.self)) },
+            })
+          } : undefined}
           onSplit={() => handleSplit(tripId, sorted)}
           onOpenMenu={() => { if (rep?.occurrence) setSelectedOcc(rep.occurrence) }}
         />
@@ -454,11 +528,11 @@ export function Rides() {
       )}
 
       {selectedOcc && (
-        <OccurrenceOverrideModal
+        <ProgramSheet
           occ={selectedOcc}
           template={templates.find(t => t.id === selectedOcc.template_id) ?? null}
           locations={locations}
-          isAdmin={isAdmin}
+          personName={personById(selectedOcc.person_id)?.display_name}
           onClose={() => setSelectedOcc(null)}
           onDone={() => {
             setSelectedOcc(null)

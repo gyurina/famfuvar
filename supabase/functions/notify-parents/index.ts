@@ -1,10 +1,10 @@
-// supabase/functions/notify-driver/index.ts
-// Kiosztás → a sofőrnek. Szöveg: _shared/messages.ts
+// supabase/functions/notify-parents/index.ts
+// Vállalás és visszaadás → a háztartás szülőinek.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { sendWithRetry } from '../_shared/pushSend.ts'
 import { buildVapidHeader, encryptWebPush } from '../_shared/webPush.ts'
-import { assignedToDriver, timeHm } from '../_shared/messages.ts'
+import { claimedByDriver, releasedByDriver, timeHm } from '../_shared/messages.ts'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -18,9 +18,15 @@ Deno.serve(async (req: Request) => {
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: CORS })
 
   let legId: string
+  let kind: 'claim' | 'release'
+  let actorId: string | null = null
+  let actorName = ''
   try {
     const body = await req.json()
     legId = body.leg_id
+    kind = body.kind === 'release' ? 'release' : 'claim'
+    actorId = body.actor_id ?? null
+    actorName = body.actor_name ?? ''
     if (!legId) throw new Error('missing leg_id')
   } catch (e) {
     return new Response(JSON.stringify({ error: String(e) }), { status: 400, headers: JSON_CORS })
@@ -47,34 +53,48 @@ Deno.serve(async (req: Request) => {
   if (legErr || !leg) {
     return new Response(JSON.stringify({ error: legErr?.message ?? 'leg not found' }), { status: 404, headers: JSON_CORS })
   }
-  if (!leg.driver_id) {
-    return new Response(JSON.stringify({ skipped: 'no driver assigned' }), { status: 200, headers: JSON_CORS })
-  }
-
-  const { data: person } = await supabase
-    .from('person').select('auth_user_id').eq('id', leg.driver_id).single()
-  if (!person?.auth_user_id) {
-    return new Response(JSON.stringify({ skipped: 'no auth user' }), { status: 200, headers: JSON_CORS })
-  }
-
-  const { data: subs } = await supabase
-    .from('push_subscription').select('endpoint, p256dh, auth').eq('user_id', person.auth_user_id)
-  if (!subs?.length) {
-    return new Response(JSON.stringify({ skipped: 'no push subscriptions' }), { status: 200, headers: JSON_CORS })
-  }
 
   const occ = leg.occurrence as { title: string; on_date: string; starts_at: string; person_id: string | null }
   const { data: child } = occ.person_id
     ? await supabase.from('person').select('display_name, name_acc').eq('id', occ.person_id).single()
     : { data: null }
-  const childAcc = child?.name_acc || child?.display_name || occ.title
-  const msg = assignedToDriver({
-    childAcc,
-    inbound: leg.direction === 'pickup',
-    title: occ.title,
-    onDate: occ.on_date,
-    time: timeHm(occ.starts_at),
-  })
+  const childName = child?.display_name ?? occ.title
+  const childAcc = child?.name_acc || childName
+  const time = timeHm(occ.starts_at)
+  const driverName = actorName || 'Valaki'
+
+  const msg = kind === 'release'
+    ? releasedByDriver({ driver: driverName, child: childName, onDate: occ.on_date, time })
+    : claimedByDriver({
+      driver: driverName,
+      childAcc,
+      inbound: leg.direction === 'pickup',
+      title: occ.title,
+      onDate: occ.on_date,
+      time,
+    })
+
+  let parentQuery = supabase
+    .from('person')
+    .select('id, auth_user_id')
+    .eq('household_id', leg.household_id)
+    .eq('role', 'parent')
+    .not('auth_user_id', 'is', null)
+  if (actorId) parentQuery = parentQuery.neq('id', actorId)
+
+  const { data: parents } = await parentQuery
+  const userIds = [...new Set((parents ?? []).map(p => p.auth_user_id).filter((id): id is string => !!id))]
+  if (userIds.length === 0) {
+    return new Response(JSON.stringify({ skipped: 'no parents' }), { status: 200, headers: JSON_CORS })
+  }
+
+  const { data: subs } = await supabase
+    .from('push_subscription')
+    .select('endpoint, p256dh, auth')
+    .in('user_id', userIds)
+  if (!subs?.length) {
+    return new Response(JSON.stringify({ skipped: 'no push subscriptions' }), { status: 200, headers: JSON_CORS })
+  }
 
   const { data: logRow } = await supabase
     .from('push_log')
@@ -133,7 +153,7 @@ Deno.serve(async (req: Request) => {
   if (logId) {
     await supabase.from('push_log').update({ sent_count: sent, failed_count: failed }).eq('id', logId)
   }
-  console.log(`notify-driver: ${sent} sent, ${failed} failed`, errors)
+  console.log(`notify-parents: ${sent} sent, ${failed} failed`, errors)
 
   return new Response(JSON.stringify({ sent, failed, errors, log_id: logId }), { status: 200, headers: JSON_CORS })
 })

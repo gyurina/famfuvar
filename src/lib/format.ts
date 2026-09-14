@@ -73,6 +73,32 @@ export function formatShortDate(date: Date | string): string {
   return format(asDate(date), 'MMM d., EEEE', { locale: hu })
 }
 
+/** „szept. 17.” — toast, szünet végéig */
+export function formatShortMonthDay(date: Date | string): string {
+  return format(asDate(date), 'MMM d.', { locale: hu })
+}
+
+/** ISO hét napja: 1 = hétfő … 7 = vasárnap */
+export function isoWeekday(date: Date | string): number {
+  const js = asDate(date).getDay()
+  return js === 0 ? 7 : js
+}
+
+export function weekdayOn(date: Date | string): string {
+  return copy.weekday.on[isoWeekday(date) - 1]
+}
+
+export function weekdayLong(date: Date | string): string {
+  return copy.weekday.long[isoWeekday(date) - 1]
+}
+
+export function joinNames(names: string[]): string {
+  const unique = [...new Set(names.filter(Boolean))]
+  if (unique.length === 0) return ''
+  if (unique.length === 1) return unique[0]
+  return unique.slice(0, -1).join(', ') + ' ' + copy.and + ' ' + unique.at(-1)
+}
+
 /** „szeptember 14.” */
 export function formatMonthDay(date: Date | string): string {
   return format(asDate(date), 'MMMM d.', { locale: hu })

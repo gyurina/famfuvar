@@ -7,11 +7,11 @@ import { Ma } from './screens/Ma'
 import { Rides } from './screens/Rides'
 import { Week } from './screens/Week'
 import { Sablon } from './screens/Sablon'
-import { Esemeny } from './screens/Esemeny'
 import { Beallitasok } from './screens/Beallitasok'
 import { More } from './screens/More'
 import { Family } from './screens/Family'
 import { OfflineBanner } from './components/OfflineBanner'
+import { ToastProvider } from './components/Toast'
 import { Icon } from './components/Icon'
 import { useRole } from './hooks/useRole'
 
@@ -54,12 +54,13 @@ function AppShell() {
   if (!session) return <Login />
 
   return (
+    <ToastProvider>
     <div className="min-h-dvh">
       <OfflineBanner />
       <Routes>
         <Route path="/" element={<Ma />} />
         <Route path="/het" element={<Week />} />
-        <Route path="/het/uj" element={<Esemeny />} />
+        <Route path="/het/uj" element={<Navigate to="/het" replace />} />
         <Route path="/fuvarok" element={<RequireParent><Rides /></RequireParent>} />
         <Route path="/egyeb" element={<RequireMore><More /></RequireMore>} />
         <Route path="/egyeb/orarend" element={<RequireFamilyLife><Sablon embedded /></RequireFamilyLife>} />
@@ -75,6 +76,7 @@ function AppShell() {
       </Routes>
       <BottomNav />
     </div>
+    </ToastProvider>
   )
 }
 
