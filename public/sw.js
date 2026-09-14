@@ -1,8 +1,8 @@
 // Família Fuvar — Service Worker
 // Push értesítések + offline shell cache
 
-const SW_VERSION = '0.9.1'
-const CACHE = 'fuvar-v1'
+const SW_VERSION = '1.0.0'
+const CACHE = 'fuvar-v1.0.0'
 const SHELL = ['/', '/index.html', '/manifest.webmanifest']
 
 self.addEventListener('install', (event) => {
