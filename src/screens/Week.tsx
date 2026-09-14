@@ -17,6 +17,7 @@ import { useHousehold } from '../hooks/useHousehold'
 import { useAuth } from '../lib/auth'
 import { useRole } from '../hooks/useRole'
 import { useAssignDriver, type AssignmentPatch } from '../hooks/useAssignDriver'
+import { useElementHeight } from '../hooks/useElementHeight'
 import { getPref, PREF_HIDE_CANCELLED } from '../lib/prefs'
 import { copy } from '../copy'
 import { formatWeekRange, formatDayTitle, toIsoDate, directionWord } from '../lib/format'
@@ -42,6 +43,8 @@ export function Week() {
   const [reloadKey, setReloadKey] = useState(0)
   const [selectedDay, setSelectedDay] = useState(toIsoDate(new Date()))
   const dayRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const chromeRef = useRef<HTMLDivElement>(null)
+  const chromeH = useElementHeight(chromeRef)
   const hideCancelled = getPref(PREF_HIDE_CANCELLED)
 
   const today = new Date()
@@ -136,7 +139,14 @@ export function Week() {
   }
 
   return (
-    <div style={{ background: 'var(--color-bg)', minHeight: '100dvh' }}>
+    <div
+      style={{
+        background: 'var(--color-bg)',
+        minHeight: '100dvh',
+        ['--sticky-chrome-h' as string]: `${chromeH}px`,
+      }}
+    >
+      <div className="sticky-chrome" ref={chromeRef}>
       <Header
         title={copy.week.title}
         subtitle={formatWeekRange(days[0], days[6])}
@@ -167,6 +177,7 @@ export function Week() {
         onSelect={scrollToDay}
         onSwipeWeek={delta => setWeekOffset(o => o + delta)}
       />
+      </div>
 
       {loading && (
         <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--color-muted)', fontSize: 13 }}>
@@ -191,6 +202,7 @@ export function Week() {
               <div
                 key={g.dateStr}
                 ref={el => { dayRefs.current[g.dateStr] = el }}
+                className="day-block"
                 style={{ marginBottom: 28 }}
               >
                 <SectionHead

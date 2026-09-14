@@ -16,6 +16,7 @@ import { useAuth } from '../lib/auth'
 import { useRole } from '../hooks/useRole'
 import { useOnlineStatus } from '../hooks/useOnlineStatus'
 import { useAssignDriver, type AssignmentPatch } from '../hooks/useAssignDriver'
+import { useElementHeight } from '../hooks/useElementHeight'
 import { getPref, PREF_HIDE_CANCELLED } from '../lib/prefs'
 import { fetchGoogleCalendars, fetchExternalEvents } from '../lib/googleCalendar'
 import { sortLegs } from '../lib/occurrences'
@@ -65,6 +66,8 @@ export function Rides() {
   const [extEvents, setExtEvents] = useState<Array<{ calendar_id: string; starts_at: string; ends_at: string; title: string | null; person_id?: string }>>([])
   const [highlight, setHighlight] = useState(highlightId)
   const highlightRef = useRef<HTMLDivElement | null>(null)
+  const chromeRef = useRef<HTMLDivElement>(null)
+  const chromeH = useElementHeight(chromeRef)
 
   const hideCancelled = getPref(PREF_HIDE_CANCELLED)
   const today = new Date()
@@ -461,7 +464,8 @@ export function Rides() {
   }
 
   return (
-    <div>
+    <div style={{ ['--sticky-chrome-h' as string]: `${chromeH}px` }}>
+      <div className="sticky-chrome" ref={chromeRef}>
       <Header
         title={copy.rides.title}
         subtitle={formatWeekRange(days[0], days[6])}
@@ -501,6 +505,7 @@ export function Rides() {
           { id: 'mine', label: copy.rides.chipMine(mineCount), count: mineCount },
         ]}
       />
+      </div>
 
       {loading && (
         <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--color-muted)', fontSize: 13 }}>
@@ -526,7 +531,7 @@ export function Rides() {
           )}
 
           {grouped.map(g => g.items.length > 0 && (
-            <div key={g.date.toISOString()} style={{ marginBottom: 24 }}>
+            <div key={g.date.toISOString()} className="day-block" style={{ marginBottom: 24 }}>
               <SectionHead variant="day" title={g.label} />
               {g.items.map(item =>
                 item.kind === 'solo'

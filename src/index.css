@@ -1270,6 +1270,24 @@ a { color: inherit; text-decoration: none; }
   cursor: default;
 }
 
+/* ── Sticky chrome (Hét / Fuvarok) ───────────────── */
+.sticky-chrome {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-header);
+  background: var(--color-bg);
+}
+.sticky-chrome .app-header {
+  position: relative;
+  background: var(--color-bg);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.day-block {
+  scroll-margin-top: var(--sticky-chrome-h, 0px);
+}
+
 /* ── SectionHead C7 ──────────────────────────────── */
 .section-head {
   display: flex;
@@ -1282,6 +1300,24 @@ a { color: inherit; text-decoration: none; }
   font-size: 17px;
   font-weight: 600;
   color: var(--color-text);
+}
+.section-head.day {
+  position: sticky;
+  top: var(--sticky-chrome-h, 0px);
+  z-index: 35;
+  background: var(--color-bg);
+  margin: 0 -16px 11px;
+  padding: 10px 16px 12px;
+}
+.section-head.day::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -10px;
+  height: 10px;
+  background: linear-gradient(180deg, var(--color-bg), transparent);
+  pointer-events: none;
 }
 .section-head.day .section-head-title {
   font-size: 13px;
