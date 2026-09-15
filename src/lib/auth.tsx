@@ -10,6 +10,7 @@ interface AuthCtx {
   loading: boolean
   signIn: (email: string, password: string) => Promise<void>
   signOut: () => Promise<void>
+  reloadPerson: () => Promise<void>
 }
 
 const Ctx = createContext<AuthCtx | null>(null)
@@ -53,8 +54,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await supabase.auth.signOut()
   }
 
+  async function reloadPerson() {
+    const { data: { session: s } } = await supabase.auth.getSession()
+    if (s) await loadPerson(s.user.id)
+  }
+
   return (
-    <Ctx.Provider value={{ session, user: session?.user ?? null, person, loading, signIn, signOut }}>
+    <Ctx.Provider value={{ session, user: session?.user ?? null, person, loading, signIn, signOut, reloadPerson }}>
       {children}
     </Ctx.Provider>
   )

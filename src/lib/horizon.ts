@@ -1,7 +1,13 @@
 import { supabase } from './supabase'
 import { budapestIso } from './occurrences'
 import { isoWeekday, toIsoDate } from './format'
+import { parseHouseholdSettings } from '../types'
 import type { ScheduleTemplate } from '../types'
+
+async function horizonDays(householdId: string): Promise<number> {
+  const { data } = await supabase.from('household').select('settings').eq('id', householdId).maybeSingle()
+  return parseHouseholdSettings(data?.settings).horizon_days
+}
 
 function addCalendarDays(iso: string, n: number): string {
   const [y, m, d] = iso.split('-').map(Number)
@@ -11,14 +17,15 @@ function addCalendarDays(iso: string, n: number): string {
 
 /** Az órarendből létrehozza / szinkronizálja a következő 30 nap programjait és fuvarjait. */
 export async function refreshHorizon(householdId: string): Promise<string | null> {
+  const daysAhead = await horizonDays(householdId)
   const { error } = await supabase.rpc('generate_horizon', {
     p_household_id: householdId,
-    p_days_ahead: 30,
+    p_days_ahead: daysAhead,
   })
   if (!error) return null
   console.warn('generate_horizon', error.message)
   try {
-    await generateHorizonClient(householdId, 30)
+    await generateHorizonClient(householdId, daysAhead)
     return null
   } catch (e) {
     return e instanceof Error ? e.message : error.message

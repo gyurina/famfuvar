@@ -1,10 +1,8 @@
-// supabase/functions/notify-parents/index.ts
-// Vállalás és visszaadás → a háztartás szülőinek.
+// Vállalás és visszaadás → a háztartás szülőinek. A cselekvő nem kap értesítést.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { sendWithRetry } from '../_shared/pushSend.ts'
-import { buildVapidHeader, encryptWebPush } from '../_shared/webPush.ts'
 import { claimedByDriver, releasedByDriver, timeHm } from '../_shared/messages.ts'
+import { deliverHouseholdPush } from '../_shared/notify.ts'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -32,24 +30,17 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify({ error: String(e) }), { status: 400, headers: JSON_CORS })
   }
 
-  const supabaseUrl  = Deno.env.get('SUPABASE_URL')!
-  const serviceKey   = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-  const vapidPub     = Deno.env.get('VAPID_PUBLIC_KEY')!
-  const vapidPriv    = Deno.env.get('VAPID_PRIVATE_KEY')!
-  const vapidSubject = Deno.env.get('VAPID_SUBJECT') ?? 'mailto:admin@example.com'
-
-  if (!vapidPub || !vapidPriv) {
-    return new Response(JSON.stringify({ error: 'VAPID keys not configured' }), { status: 500, headers: JSON_CORS })
-  }
-
-  const supabase = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } })
+  const supabase = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+    { auth: { persistSession: false } },
+  )
 
   const { data: leg, error: legErr } = await supabase
     .from('transport_leg')
     .select('*, occurrence!inner(title, on_date, starts_at, person_id)')
     .eq('id', legId)
     .single()
-
   if (legErr || !leg) {
     return new Response(JSON.stringify({ error: legErr?.message ?? 'leg not found' }), { status: 404, headers: JSON_CORS })
   }
@@ -62,7 +53,6 @@ Deno.serve(async (req: Request) => {
   const childAcc = child?.name_acc || childName
   const time = timeHm(occ.starts_at)
   const driverName = actorName || 'Valaki'
-
   const msg = kind === 'release'
     ? releasedByDriver({ driver: driverName, child: childName, onDate: occ.on_date, time })
     : claimedByDriver({
@@ -74,86 +64,22 @@ Deno.serve(async (req: Request) => {
       time,
     })
 
-  let parentQuery = supabase
+  const { data: parents } = await supabase
     .from('person')
-    .select('id, auth_user_id')
+    .select('id')
     .eq('household_id', leg.household_id)
     .eq('role', 'parent')
-    .not('auth_user_id', 'is', null)
-  if (actorId) parentQuery = parentQuery.neq('id', actorId)
 
-  const { data: parents } = await parentQuery
-  const userIds = [...new Set((parents ?? []).map(p => p.auth_user_id).filter((id): id is string => !!id))]
-  if (userIds.length === 0) {
-    return new Response(JSON.stringify({ skipped: 'no parents' }), { status: 200, headers: JSON_CORS })
-  }
-
-  const { data: subs } = await supabase
-    .from('push_subscription')
-    .select('endpoint, p256dh, auth')
-    .in('user_id', userIds)
-  if (!subs?.length) {
-    return new Response(JSON.stringify({ skipped: 'no push subscriptions' }), { status: 200, headers: JSON_CORS })
-  }
-
-  const { data: logRow } = await supabase
-    .from('push_log')
-    .insert({
-      household_id: leg.household_id,
-      title: msg.title,
-      body: msg.body,
-      target_count: subs.length,
-    })
-    .select('id')
-    .single()
-  const logId = logRow?.id ?? null
-
-  const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
-  const notifPayload = JSON.stringify({
+  const result = await deliverHouseholdPush({
+    supabase,
+    householdId: leg.household_id,
+    kind,
+    actorId,
+    recipientPersonIds: (parents ?? []).map(p => p.id),
     title: msg.title,
     body: msg.body,
-    url: `/fuvarok?ride=${legId}`,
-    log_id: logId,
-    supabase_url: supabaseUrl,
-    apikey: anonKey,
+    entity: 'transport_leg',
+    entityId: legId,
   })
-
-  const results = await Promise.allSettled(
-    subs.map(async (sub) => {
-      let stage = 'vapid'
-      try {
-        const authHeader = await buildVapidHeader(sub.endpoint, vapidPub, vapidPriv, vapidSubject)
-        stage = 'encrypt'
-        const encBody = await encryptWebPush(notifPayload, sub.p256dh, sub.auth)
-        stage = 'fetch'
-        const res = await sendWithRetry(sub.endpoint, encBody, {
-          'Content-Encoding': 'aes128gcm',
-          'Content-Type':     'application/octet-stream',
-          'Content-Length':   String(encBody.length),
-          'TTL':              '86400',
-          'Authorization':    authHeader,
-        })
-        if (!res.ok) {
-          const txt = await res.text().catch(() => '')
-          if (res.status === 410 || res.status === 404) {
-            await supabase.from('push_subscription').delete().eq('endpoint', sub.endpoint)
-          }
-          throw new Error(`HTTP ${res.status}: ${txt}`)
-        }
-      } catch (e) {
-        throw new Error(`[${stage}] ${(e as Error).message}`)
-      }
-    })
-  )
-
-  const sent   = results.filter(r => r.status === 'fulfilled').length
-  const failed = results.filter(r => r.status === 'rejected').length
-  const errors = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected')
-                        .map(r => r.reason?.message ?? String(r.reason))
-  if (logId) {
-    await supabase.from('push_log').update({ sent_count: sent, failed_count: failed }).eq('id', logId)
-  }
-  console.log(`notify-parents: ${sent} sent, ${failed} failed`, errors)
-
-  return new Response(JSON.stringify({ sent, failed, errors, log_id: logId }), { status: 200, headers: JSON_CORS })
+  return new Response(JSON.stringify(result), { status: 200, headers: JSON_CORS })
 })

@@ -16,7 +16,7 @@ import type { BreakPeriod } from '../types'
 
 export function More() {
   const { person, signOut } = useAuth()
-  const { isAdmin, isGrandparent, isBabysitter } = useRole()
+  const { isAdmin, isSysAdmin, isGrandparent, isBabysitter } = useRole()
   const { persons, drivers, children, locations, travelTimes, householdId } = useHousehold()
   const [householdName, setHouseholdName] = useState('')
   const [templateCount, setTemplateCount] = useState(0)
@@ -189,6 +189,17 @@ export function More() {
             </span>
           </button>
         </div>
+
+        {isSysAdmin && (
+          <>
+            <div className="more-group-label">{copy.more.adminGroup}</div>
+            <div className="more-group">
+              {row('/egyeb/naplo', 'clipboard', copy.more.naplo, copy.more.naploSub)}
+              {row('/egyeb/posta', 'list', copy.more.posta, copy.more.postaSub)}
+              {row('/egyeb/rendszer', 'gear', copy.more.rendszer, copy.more.rendszerSub)}
+            </div>
+          </>
+        )}
 
         <button type="button" className="more-signout" onClick={signOut}>
           <Icon name="sign-out" size={19} />

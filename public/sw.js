@@ -1,8 +1,8 @@
 // Família Fuvar — Service Worker
 // Push értesítések + offline shell cache
 
-const SW_VERSION = '1.0.1'
-const CACHE = 'fuvar-v1.0.1'
+const SW_VERSION = '1.1.0'
+const CACHE = 'fuvar-v1.1.0'
 const SHELL = ['/', '/index.html', '/manifest.webmanifest']
 
 self.addEventListener('install', (event) => {
@@ -79,7 +79,7 @@ self.addEventListener('push', (event) => {
     icon:    '/pwa-192x192.png',
     badge:   '/pwa-192x192.png',
     vibrate: [200, 100, 200],
-    data:    { url: data.url ?? '/?inbox=1', log_id: logId, supabase_url: supabaseUrl, apikey },
+    data:    { url: data.url ?? '/uzenetek', log_id: logId, supabase_url: supabaseUrl, apikey },
     actions: [{ action: 'open', title: 'Megnyitás' }],
   }
 
@@ -93,7 +93,7 @@ self.addEventListener('push', (event) => {
 // ── Értesítésre kattintás ───────────────────────────────────
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
-  const url = event.notification.data?.url ?? '/?inbox=1'
+  const url = event.notification.data?.url ?? '/uzenetek'
 
   const logId       = event.notification.data?.log_id       ?? null
   const supabaseUrl = event.notification.data?.supabase_url ?? ''

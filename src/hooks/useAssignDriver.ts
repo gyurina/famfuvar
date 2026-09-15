@@ -127,7 +127,7 @@ export function useAssignDriver(onUpdated?: (patch: AssignmentPatch) => void) {
     if (notify && !selfTransport) {
       const actorId = person?.id ?? null
       if (driverId && actorId && driverId !== actorId) {
-        supabase.functions.invoke('notify-driver', { body: { leg_id: legId } })
+        supabase.functions.invoke('notify-driver', { body: { leg_id: legId, actor_id: actorId } })
           .catch(e => console.warn('notify-driver:', e))
       } else if (!guestName) {
         supabase.functions.invoke('notify-parents', {

@@ -13,6 +13,7 @@ export function useRole() {
   const role: PersonRole | undefined = person?.role
 
   const isAdmin       = role === 'parent'
+  const isSysAdmin    = !!person?.is_admin
   const isGrandparent = role === 'grandparent'
   const isBabysitter  = role === 'babysitter'
   const isChild       = role === 'child'
@@ -25,7 +26,7 @@ export function useRole() {
   const isFilteredView = isBabysitter
 
   return {
-    role, isAdmin, isGrandparent, isBabysitter, isChild,
+    role, isAdmin, isSysAdmin, isGrandparent, isBabysitter, isChild,
     canDriveOnly, canSeeSablon, isFilteredView,
     // ── redesign terv 2. szakasz — beszédes nevek ──────────────────────────
     canAssignOthers:   isAdmin,

@@ -39,6 +39,33 @@ export interface Household {
   name: string
   google_calendar_id: string | null
   created_at: string
+  settings?: HouseholdSettings | Record<string, unknown> | null
+}
+
+export interface HouseholdSettings {
+  horizon_days: number
+  reminder_minutes: number
+  notify_on_time_change: boolean
+  notify_other_parents_on_time_change: boolean
+}
+
+export const DEFAULT_HOUSEHOLD_SETTINGS: HouseholdSettings = {
+  horizon_days: 30,
+  reminder_minutes: 30,
+  notify_on_time_change: true,
+  notify_other_parents_on_time_change: true,
+}
+
+export function parseHouseholdSettings(raw: unknown): HouseholdSettings {
+  const o = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+  const days = Number(o.horizon_days)
+  const mins = Number(o.reminder_minutes)
+  return {
+    horizon_days: Number.isFinite(days) && days >= 7 && days <= 90 ? Math.round(days) : DEFAULT_HOUSEHOLD_SETTINGS.horizon_days,
+    reminder_minutes: Number.isFinite(mins) && mins >= 5 && mins <= 180 ? Math.round(mins) : DEFAULT_HOUSEHOLD_SETTINGS.reminder_minutes,
+    notify_on_time_change: o.notify_on_time_change === false ? false : true,
+    notify_other_parents_on_time_change: o.notify_other_parents_on_time_change === false ? false : true,
+  }
 }
 
 export interface Person {
@@ -50,6 +77,7 @@ export interface Person {
   role: PersonRole
   can_drive: boolean
   color: string
+  is_admin?: boolean
 }
 
 export interface Location {
@@ -200,10 +228,16 @@ export interface DriverBusyConflict {
   ends_at: string
 }
 
+export type PushKind = 'assign' | 'claim' | 'release' | 'custom' | 'time' | 'cancel'
+
 export interface PushLog {
   id: string
   household_id: string
   sent_by: string | null
+  actor_id?: string | null
+  kind?: PushKind | string | null
+  entity?: string | null
+  entity_id?: string | null
   title: string
   body: string
   sent_at: string
@@ -212,4 +246,23 @@ export interface PushLog {
   failed_count: number
   delivered_count?: number
   clicked_count?: number
+}
+
+export interface PushRecipient {
+  log_id: string
+  person_id: string
+  read_at: string | null
+}
+
+export interface AuditEvent {
+  id: string
+  household_id: string
+  actor_id: string | null
+  source: 'user' | 'system'
+  entity: 'occurrence' | 'transport_leg'
+  entity_id: string
+  action: 'insert' | 'update' | 'delete'
+  before: Record<string, unknown> | null
+  after: Record<string, unknown> | null
+  created_at: string
 }

@@ -88,6 +88,19 @@ export function cancelledRide(opts: {
   }
 }
 
+export function timeChanged(opts: {
+  child: string
+  title: string
+  onDate: string
+  oldTime: string
+  newTime: string
+}): { title: string; body: string } {
+  return {
+    title: opts.title,
+    body: `Módosult: ${opts.child} ${opts.title.toLowerCase()}, ${weekdayBare(opts.onDate)} ${opts.oldTime} → ${opts.newTime}.`,
+  }
+}
+
 export function breakCancelled(opts: {
   child: string
   until: string

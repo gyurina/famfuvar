@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { Header } from '../components/Header'
 import { supabase } from '../lib/supabase'
 import { useHousehold } from '../hooks/useHousehold'
 import { useAuth } from '../lib/auth'
 import { useRole } from '../hooks/useRole'
 import { getPref, setPref, PREF_HIDE_CANCELLED } from '../lib/prefs'
-import type { ExternalCalendar, Location, TravelTime, DriverAvailability, UnavailableBlock, TravelGroup, TravelGroupMember, PushLog, BreakPeriod, PersonRole } from '../types'
+import type { ExternalCalendar, Location, TravelTime, DriverAvailability, UnavailableBlock, TravelGroup, TravelGroupMember, BreakPeriod, PersonRole } from '../types'
 import { isPushSupported, isPushSubscribed, subscribeToPush, unsubscribeFromPush } from '../lib/push'
 import { startGoogleAuth, syncNow, disconnectGoogle, fetchGoogleCalendars } from '../lib/googleCalendar'
 import { forceRegenerateLegs } from '../lib/occurrences'
@@ -63,7 +64,7 @@ const btnDanger: React.CSSProperties = {
 
 export function Beallitasok({ section }: { section?: SettingsSection } = {}) {
   const { signOut, person } = useAuth()
-  const { canEditHousehold } = useRole()
+  const { canEditHousehold, isSysAdmin } = useRole()
   const { show } = useToast()
   const {
     persons, drivers,
@@ -123,36 +124,6 @@ export function Beallitasok({ section }: { section?: SettingsSection } = {}) {
   const [pushTargetIds, setPushTargetIds] = useState<string[]>([])
   const [pushSending, setPushSending] = useState(false)
   const [pushResult, setPushResult] = useState<string | null>(null)
-  const [pushLogs, setPushLogs] = useState<PushLog[]>([])
-  const [pushLogsLoading, setPushLogsLoading] = useState(false)
-
-  async function refreshPushLogs() {
-    if (!householdId) return
-    setPushLogsLoading(true)
-    const { data: logs } = await supabase.from('push_log')
-      .select('id, title, body, sent_at, target_count, sent_count, failed_count, sent_by')
-      .eq('household_id', householdId)
-      .order('sent_at', { ascending: false })
-      .limit(10)
-    if (!logs?.length) { setPushLogs([]); setPushLogsLoading(false); return }
-    const logIds = logs.map(l => l.id)
-    const { data: receipts } = await supabase
-      .from('push_log_receipt')
-      .select('log_id, event')
-      .in('log_id', logIds)
-    const countMap: Record<string, { delivered: number; clicked: number }> = {}
-    for (const r of receipts ?? []) {
-      if (!countMap[r.log_id]) countMap[r.log_id] = { delivered: 0, clicked: 0 }
-      if (r.event === 'delivered') countMap[r.log_id].delivered++
-      if (r.event === 'clicked') countMap[r.log_id].clicked++
-    }
-    setPushLogs(logs.map(l => ({
-      ...l,
-      delivered_count: countMap[l.id]?.delivered ?? 0,
-      clicked_count:   countMap[l.id]?.clicked   ?? 0,
-    })) as PushLog[])
-    setPushLogsLoading(false)
-  }
 
   async function sendCustomPush() {
     if (!householdId || !pushTitle.trim()) return
@@ -181,18 +152,12 @@ export function Beallitasok({ section }: { section?: SettingsSection } = {}) {
       setPushResult(copy.settings.pushSent(json.sent ?? 0, json.failed))
       setPushOk(true)
       setPushTitle(''); setPushBody(''); setPushTargetIds([])
-      await refreshPushLogs()
     } catch (e) {
       setPushResult(copy.settings.pushError(String(e)))
       setPushOk(false)
     }
     setPushSending(false)
   }
-
-  useEffect(() => {
-    if (!householdId || tab !== 'push') return
-    refreshPushLogs()
-  }, [householdId, tab])
 
   useEffect(() => { setLocations(initLocations) }, [initLocations])
   useEffect(() => { setTravelTimes(initTravelTimes) }, [initTravelTimes])
@@ -1580,28 +1545,18 @@ export function Beallitasok({ section }: { section?: SettingsSection } = {}) {
               </div>
             )}
 
-            {/* ── Előzmények ── */}
-            <div style={{ marginTop: 20 }}>
-              <div className="section-label">{copy.common.history}</div>
-              {pushLogsLoading ? (
-                <div style={{ textAlign: 'center', padding: 16, color: 'var(--color-muted)', fontSize: 12 }}>{copy.common.loading}</div>
-              ) : pushLogs.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: 16, color: 'var(--color-muted)', fontSize: 12 }}>{copy.settings.pushEmptyLogs}</div>
-              ) : pushLogs.map(log => (
-                <div key={log.id} style={{
-                  borderRadius: 10, padding: '9px 12px', marginBottom: 6,
-                  background: 'var(--color-surface)', border: '1px solid var(--color-border)',
-                }}>
-                  <div style={{ fontSize: 12, fontWeight: 600 }}>{log.title}</div>
-                  <div style={{ fontSize: 11, color: 'var(--color-muted)', marginTop: 2 }}>
-                    {formatDateTime(log.sent_at)}
-                    {' · '}{copy.settings.pushLogSent(log.sent_count, log.target_count)}
-                    {' · '}{copy.settings.pushLogDelivered(log.delivered_count ?? 0)}
-                    {' · '}{copy.settings.pushLogOpened(log.clicked_count ?? 0)}
-                  </div>
-                </div>
-              ))}
-            </div>
+            {isSysAdmin && (
+              <Link to="/egyeb/posta" className="more-row" style={{
+                marginTop: 8, borderRadius: 12, border: '1px solid var(--color-border)',
+                background: 'var(--color-surface)',
+              }}>
+                <Icon name="list" size={21} color="var(--color-accent-ink)" />
+                <span className="more-row-text">
+                  <span className="more-row-title">{copy.settings.pushSeeAll}</span>
+                </span>
+                <Icon name="caret-right" size={17} color="var(--color-muted)" />
+              </Link>
+            )}
           </div>
         )}
 

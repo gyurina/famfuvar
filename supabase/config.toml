@@ -15,3 +15,6 @@ verify_jwt = true
 
 [functions.notify-parents]
 verify_jwt = true
+
+[functions.notify-event]
+verify_jwt = true

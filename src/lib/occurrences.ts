@@ -24,6 +24,10 @@ async function currentPersonId(): Promise<string | null> {
 export async function cancelOccurrence(occurrenceId: string): Promise<void> {
   const personId = await currentPersonId()
 
+  supabase.functions.invoke('notify-event', {
+    body: { kind: 'cancel', occurrence_id: occurrenceId, actor_id: personId },
+  }).catch(e => console.warn('notify-event:', e))
+
   // 1. Státusz váltás
   const { error: occErr } = await supabase
     .from('occurrence')
@@ -80,6 +84,17 @@ export async function updateOccurrence(
     .eq('id', occurrenceId)
 
   if (error) throw error
+
+  if (patch.starts_at || patch.ends_at) {
+    supabase.functions.invoke('notify-event', {
+      body: {
+        kind: 'time',
+        occurrence_id: occurrenceId,
+        actor_id: personId,
+        old_time: String(occ.starts_at).slice(0, 5),
+      },
+    }).catch(e => console.warn('notify-event:', e))
+  }
 
   // Transport leg-ek újragenerálása, ha időpont vagy helyszín változott
   if (patch.starts_at || patch.ends_at || patch.location_id) {
